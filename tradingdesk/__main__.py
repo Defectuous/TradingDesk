@@ -80,8 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force-session", choices=["premarket", "open"], default=None,
                         help="pretend we're in this session (testing outside market hours)")
     parser.add_argument("--max-symbols", type=int, default=None, help="cap the universe (testing)")
-    parser.add_argument("--buying-power", type=float, default=1000.0,
-                        help="assumed buying power until the broker layer exists (phase 3)")
+    parser.add_argument("--cash", type=float, default=None,
+                        help="use this cash amount instead of reading the Alpaca account (testing)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.config)
@@ -90,13 +90,14 @@ def main(argv: list[str] | None = None) -> int:
     if rc or args.command == "check":
         return rc
 
+    from tradingdesk.account import StaticCash
     from tradingdesk.market import WtbotMarketData
     from tradingdesk.runner import build_pipeline, run_loop
 
     with Journal(settings.path(settings.config.paths.journal_db)) as journal:
         pipeline = build_pipeline(
             settings, journal, market=WtbotMarketData(max_symbols=args.max_symbols),
-            force_session=args.force_session, buying_power=args.buying_power,
+            force_session=args.force_session, cash=StaticCash(args.cash) if args.cash else None,
         )
         run_loop(pipeline, settings.config.scout.poll_interval_sec, once=args.once)
     return 0

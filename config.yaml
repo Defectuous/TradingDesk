@@ -21,19 +21,24 @@ sessions:
 
 # --- Risk Officer hard limits ------------------------------------------------
 # Per-session limits: premarket is stricter (thin volume, wide spreads, software-managed stops).
+# Dollar limits scale with the account's CASH (read from Alpaca every
+# cash_refresh_sec, like WTBot's 2% / 20% sizing). Per-trade limits use current
+# cash; the daily loss limit uses the day's first cash reading, so it doesn't
+# shrink when cash is tied up in an open position.
 risk:
-  max_daily_loss_usd: 60.0      # stop trading for the day when realized+open loss hits this
+  cash_refresh_sec: 60
+  max_daily_loss_pct: 6.0       # stop trading for the day at -6% of start-of-day cash
   max_trades_per_day: 5
   max_open_positions: 2
   premarket:
-    max_risk_per_trade_usd: 10.0
-    max_position_usd: 100.0
+    max_risk_per_trade_pct: 1.0   # half of open: thin books, software-managed stop
+    max_position_pct: 10.0
     max_spread_pct: 1.0
     min_volume: 100000          # minimum shares traded so far in the session
     min_risk_reward: 2.0
   open:
-    max_risk_per_trade_usd: 20.0
-    max_position_usd: 200.0
+    max_risk_per_trade_pct: 2.0   # WTBot: 2% of cash risked per trade
+    max_position_pct: 20.0        # WTBot: 20% of cash max per position
     max_spread_pct: 1.5
     min_volume: 250000
     min_risk_reward: 1.8

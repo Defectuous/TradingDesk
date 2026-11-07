@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from tradingdesk.account import JournalAccountProvider
+from tradingdesk.account import AlpacaCash, CashSource, JournalAccountProvider
 from tradingdesk.agents.manager import Manager
 from tradingdesk.agents.risk_officer import RiskOfficer
 from tradingdesk.agents.scout import Scout
@@ -39,7 +39,7 @@ def build_pipeline(
     journal: Journal,
     market: MarketData | None = None,
     force_session: TradingSession | None = None,
-    buying_power: float = 1000.0,
+    cash: CashSource | None = None,
 ) -> Pipeline:
     wtbot_config.apply_settings(settings)
     clock = SessionClock(settings.config.sessions)
@@ -48,10 +48,11 @@ def build_pipeline(
     market = market or WtbotMarketData()
     cache = ResearchCache()
     tickets = TicketQueue()
+    cash = cash or AlpacaCash(settings.secrets.alpaca_api_key, settings.secrets.alpaca_secret_key)
     scout = Scout(settings, market, cache, clock)
     manager = Manager(
         settings.config.manager, cache, StubSkeptic(), RiskOfficer(settings.config.risk, clock),
-        JournalAccountProvider(journal, tickets, buying_power), market, journal, tickets,
+        JournalAccountProvider(journal, tickets, cash, settings.config.risk.cash_refresh_sec), market, journal, tickets,
     )
     return Pipeline(clock, scout, manager, tickets, journal)
 

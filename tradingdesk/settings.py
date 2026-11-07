@@ -77,15 +77,16 @@ class SessionsConfig(_Strict):
 
 
 class SessionRisk(_Strict):
-    max_risk_per_trade_usd: float = Field(gt=0)
-    max_position_usd: float = Field(gt=0)
+    max_risk_per_trade_pct: float = Field(gt=0, le=10)    # % of current cash
+    max_position_pct: float = Field(gt=0, le=100)         # % of current cash
     max_spread_pct: float = Field(gt=0)
     min_volume: int = Field(ge=0)
     min_risk_reward: float = Field(gt=0)
 
 
 class RiskConfig(_Strict):
-    max_daily_loss_usd: float = Field(gt=0)
+    cash_refresh_sec: float = Field(60, gt=0)
+    max_daily_loss_pct: float = Field(gt=0, le=50)        # % of start-of-day cash
     max_trades_per_day: int = Field(gt=0)
     max_open_positions: int = Field(gt=0)
     premarket: SessionRisk

@@ -12,7 +12,7 @@ from tradingdesk.sessions import SessionClock
 OPEN_NOW = et(2026, 11, 9, 9, 45)       # Monday, open session
 PM_NOW = et(2026, 11, 9, 7, 15)         # premarket
 QUOTE = Quote(price=4.20, bid=4.19, ask=4.21)
-ACCOUNT = AccountState(buying_power=10_000)
+ACCOUNT = AccountState(cash=1000, buying_power=10_000)
 
 
 @pytest.fixture
@@ -82,27 +82,27 @@ def test_session_change_rejected(ro):
 
 
 def test_daily_loss_limit(ro):
-    acct = AccountState(buying_power=10_000, realized_pnl_today=-45, open_pnl=-15)
+    acct = AccountState(cash=1000, buying_power=10_000, realized_pnl_today=-45, open_pnl=-15)
     d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
     assert ro.daily_loss_hit(acct)
     assert not d.ok and any("daily loss limit" in r for r in d.reasons)
 
 
 def test_remaining_loss_budget_caps_risk(ro):
-    acct = AccountState(buying_power=10_000, realized_pnl_today=-55)   # $5 of $60 left
+    acct = AccountState(cash=1000, buying_power=10_000, realized_pnl_today=-55)   # $5 of $60 left
     d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
     assert d.ok and d.sizing.shares == 25 and d.sizing.dollars_at_risk <= 5
 
 
 def test_max_trades_and_positions(ro):
-    d = ro.evaluate(challenged(), AccountState(buying_power=10_000, trades_today=5), QUOTE, OPEN_NOW)
+    d = ro.evaluate(challenged(), AccountState(cash=1000, buying_power=10_000, trades_today=5), QUOTE, OPEN_NOW)
     assert any("max trades per day" in r for r in d.reasons)
-    d = ro.evaluate(challenged(), AccountState(buying_power=10_000, open_positions=2), QUOTE, OPEN_NOW)
+    d = ro.evaluate(challenged(), AccountState(cash=1000, buying_power=10_000, open_positions=2), QUOTE, OPEN_NOW)
     assert any("max open positions" in r for r in d.reasons)
 
 
 def test_duplicate_ticker_rejected(ro):
-    acct = AccountState(buying_power=10_000, active_tickers=frozenset({"ABCD"}))
+    acct = AccountState(cash=1000, buying_power=10_000, active_tickers=frozenset({"ABCD"}))
     d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
     assert any("already held" in r for r in d.reasons)
 
@@ -141,7 +141,7 @@ def test_halted_rejected(ro):
 
 
 def test_buying_power_caps_size(ro):
-    d = ro.evaluate(challenged(), AccountState(buying_power=100), QUOTE, OPEN_NOW)
+    d = ro.evaluate(challenged(), AccountState(cash=1000, buying_power=100), QUOTE, OPEN_NOW)
     assert d.ok and d.sizing.shares == 23
 
 
@@ -151,13 +151,13 @@ def test_stop_too_wide_for_any_share(ro):
     q = Quote(19.0, 18.99, 19.01)
     d = ro.evaluate(challenged(trade=t, price=19.0), ACCOUNT, q, OPEN_NOW)
     assert d.ok and d.sizing.shares == 1
-    acct = AccountState(buying_power=10_000, realized_pnl_today=-45)
+    acct = AccountState(cash=1000, buying_power=10_000, realized_pnl_today=-45)
     d = ro.evaluate(challenged(trade=t, price=19.0), acct, q, OPEN_NOW)
     assert not d.ok and any("too wide" in r for r in d.reasons)
 
 
 def test_reasons_accumulate(ro):
-    acct = AccountState(buying_power=10_000, trades_today=9, open_positions=9)
+    acct = AccountState(cash=1000, buying_power=10_000, trades_today=9, open_positions=9)
     d = ro.evaluate(challenged(volume=1), acct, None, et(2026, 11, 9, 12, 0))
     assert len(d.reasons) >= 4
 
@@ -175,7 +175,7 @@ def test_recheck_refuses_larger_size(ro):
 
 
 def test_recheck_blocks_after_limit_hit(ro):
-    acct = AccountState(buying_power=10_000, realized_pnl_today=-60)
+    acct = AccountState(cash=1000, buying_power=10_000, realized_pnl_today=-60)
     d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW, requested_shares=10)
     assert not d.ok
 
@@ -204,3 +204,55 @@ def test_cannot_reach_challenged_without_skeptic():
     c.record_pass(Agent.MANAGER)
     with pytest.raises(IllegalTransition):
         c.transition(CandidateStatus.CHALLENGED, by=Agent.MANAGER)
+
+
+# -- limits scale with account cash ---------------------------------------------------
+
+def test_limits_scale_with_cash(ro):
+    small = AccountState(cash=485.50, buying_power=485.50)
+    usd = ro.dollar_limits("open", small)
+    assert (usd.max_risk_per_trade, usd.max_position, usd.max_daily_loss) == (9.71, 97.10, 29.13)
+    pm = ro.dollar_limits("premarket", small)
+    assert (pm.max_risk_per_trade, pm.max_position) == (4.86, 48.55)
+    d = ro.evaluate(challenged(), small, QUOTE, OPEN_NOW)
+    assert d.ok and d.sizing.shares == 22            # $97.10 / 4.25
+    assert d.sizing.limits["cash"] == 485.50
+
+
+def test_daily_loss_uses_start_of_day_cash(ro):
+    """Cash drops when a position is open; the daily limit must not shrink with it."""
+    acct = AccountState(cash=300, buying_power=300, day_start_cash=1000, realized_pnl_today=-35)
+    assert ro.dollar_limits("open", acct).max_daily_loss == 60.0
+    assert not ro.daily_loss_hit(acct)
+    assert ro.daily_loss_hit(AccountState(cash=300, buying_power=300, day_start_cash=1000, realized_pnl_today=-60))
+
+
+def test_zero_cash_blocks_trading(ro):
+    d = ro.evaluate(challenged(), AccountState(cash=0, buying_power=0), QUOTE, OPEN_NOW)
+    assert not d.ok
+
+
+def test_account_provider_pins_day_start_and_caches(tmp_path):
+    from tradingdesk.account import CashReading, JournalAccountProvider
+    from tradingdesk.journal import Journal
+    from tradingdesk.tickets import TicketQueue
+
+    class Counting:
+        def __init__(self):
+            self.values, self.calls = [1000.0, 700.0], 0
+
+        def read(self):
+            v = self.values[min(self.calls, 1)]
+            self.calls += 1
+            return CashReading(v, v)
+
+    src = Counting()
+    with Journal(tmp_path / "j.db") as j:
+        prov = JournalAccountProvider(j, TicketQueue(), src, refresh_sec=0)
+        first = prov.state(OPEN_NOW)
+        second = prov.state(OPEN_NOW)
+        assert (first.cash, second.cash) == (1000.0, 700.0)
+        assert second.day_start_cash == 1000.0        # pinned to the day's first reading
+        cached = JournalAccountProvider(j, TicketQueue(), Counting(), refresh_sec=60)
+        cached.state(OPEN_NOW); cached.state(OPEN_NOW)
+        assert cached.cash_source.calls == 1

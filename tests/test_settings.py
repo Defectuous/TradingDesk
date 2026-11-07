@@ -14,7 +14,7 @@ def test_real_config_loads(make_settings):
     c = s.config
     assert c.sessions.open == time(9, 30)
     assert c.sessions.new_trade_cutoff == time(11, 0)
-    assert c.risk.premarket.max_risk_per_trade_usd < c.risk.open.max_risk_per_trade_usd
+    assert c.risk.premarket.max_risk_per_trade_pct < c.risk.open.max_risk_per_trade_pct
     assert c.risk.premarket.max_spread_pct <= c.risk.open.max_spread_pct
     assert c.desk.host == "127.0.0.1"
     assert c.broker.alpaca.paper is True

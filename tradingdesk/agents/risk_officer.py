@@ -6,6 +6,10 @@ rejection: the Candidate model won't move to risk_cleared without this agent's
 pass, and the Trade Desk re-runs `evaluate()` at click time (phase 3) with
 `requested_shares` set to what the human approved.
 
+Dollar limits are percentages of account cash (config.yaml `risk`):
+  per-trade risk and max position  % of current cash
+  daily loss limit                 % of the day's first cash reading
+
 Sizing:
   effective entry = max(proposed entry, current ask/price)   R:R and risk use the *current* price
   shares = floor(min(per-trade risk, remaining daily-loss budget) / risk per share)
@@ -25,7 +29,9 @@ from tradingdesk.settings import RiskConfig
 
 @dataclass(frozen=True)
 class AccountState:
+    cash: float                               # current account cash (sizing basis)
     buying_power: float
+    day_start_cash: float | None = None       # first cash reading today (daily-loss basis)
     realized_pnl_today: float = 0.0
     open_pnl: float = 0.0
     trades_today: int = 0                     # approved trades (filled or working)
@@ -35,6 +41,17 @@ class AccountState:
     @property
     def day_pnl(self) -> float:
         return self.realized_pnl_today + self.open_pnl
+
+    @property
+    def loss_basis(self) -> float:
+        return self.day_start_cash if self.day_start_cash is not None else self.cash
+
+
+@dataclass(frozen=True)
+class DollarLimits:
+    max_risk_per_trade: float
+    max_position: float
+    max_daily_loss: float
 
 
 @dataclass
@@ -56,8 +73,18 @@ class RiskOfficer:
         self.cfg = cfg
         self.clock = clock
 
+    def dollar_limits(self, session: str, account: AccountState) -> DollarLimits:
+        lim = self.cfg.for_session(session)  # type: ignore[arg-type]
+        cash = max(account.cash, 0.0)
+        return DollarLimits(
+            max_risk_per_trade=round(cash * lim.max_risk_per_trade_pct / 100, 2),
+            max_position=round(cash * lim.max_position_pct / 100, 2),
+            max_daily_loss=round(max(account.loss_basis, 0.0) * self.cfg.max_daily_loss_pct / 100, 2),
+        )
+
     def daily_loss_hit(self, account: AccountState) -> bool:
-        return account.day_pnl <= -self.cfg.max_daily_loss_usd
+        limit = self.dollar_limits("open", account).max_daily_loss
+        return limit <= 0 or account.day_pnl <= -limit
 
     def evaluate(
         self,
@@ -79,9 +106,12 @@ class RiskOfficer:
         elif session != candidate.session:
             no(f"session changed from {candidate.session} to {session}")
         limits = c.for_session(candidate.session)
+        usd = self.dollar_limits(candidate.session, account)
+        d.checks["cash"] = account.cash
 
         if self.daily_loss_hit(account):
-            no(f"daily loss limit reached (day P&L {account.day_pnl:.2f} <= -{c.max_daily_loss_usd:.2f})")
+            no(f"daily loss limit reached (day P&L {account.day_pnl:.2f}, limit -{usd.max_daily_loss:.2f} = "
+               f"{c.max_daily_loss_pct}% of ${account.loss_basis:.2f})")
         if account.trades_today >= c.max_trades_per_day:
             no(f"max trades per day reached ({account.trades_today}/{c.max_trades_per_day})")
         if account.open_positions >= c.max_open_positions:
@@ -120,10 +150,10 @@ class RiskOfficer:
             no(f"R:R {rr:.2f} from current price < min {limits.min_risk_reward}")
 
         # -- sizing -------------------------------------------------------------------------
-        loss_budget = c.max_daily_loss_usd + min(account.day_pnl, 0.0)
-        risk_dollars = min(limits.max_risk_per_trade_usd, loss_budget)
+        loss_budget = usd.max_daily_loss + min(account.day_pnl, 0.0)
+        risk_dollars = min(usd.max_risk_per_trade, loss_budget)
         shares = _floor(risk_dollars / rps) if risk_dollars > 0 else 0
-        shares = min(shares, _floor(limits.max_position_usd / eff_entry))
+        shares = min(shares, _floor(usd.max_position / eff_entry))
         shares = min(shares, _floor(max(account.buying_power, 0) / eff_entry))
         if requested_shares is not None:
             if requested_shares < 1:
@@ -133,7 +163,8 @@ class RiskOfficer:
             shares = min(shares, requested_shares)
         d.checks["shares"] = shares
         if shares < 1:
-            no(f"stop {rps:.2f}/share too wide for ${risk_dollars:.2f} risk / ${limits.max_position_usd} max position")
+            no(f"stop {rps:.2f}/share too wide for ${risk_dollars:.2f} risk / ${usd.max_position:.2f} max position "
+               f"(cash ${account.cash:.2f})")
 
         if d.reasons:
             return d
@@ -146,8 +177,10 @@ class RiskOfficer:
             # Alpaca can't hold a stop order in extended hours (verified in phase 3).
             software_managed_stop=candidate.session == "premarket",
             limits={
-                "max_risk_per_trade_usd": limits.max_risk_per_trade_usd,
-                "max_position_usd": limits.max_position_usd,
+                "cash": account.cash,
+                "max_risk_per_trade_usd": usd.max_risk_per_trade,
+                "max_position_usd": usd.max_position,
+                "max_daily_loss_usd": usd.max_daily_loss,
                 "max_spread_pct": limits.max_spread_pct,
                 "min_risk_reward": limits.min_risk_reward,
                 "risk_reward_now": rr,

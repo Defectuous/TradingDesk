@@ -4,6 +4,7 @@ import pytest
 
 from tests.conftest import et
 from tests.fakes import FakeMarket
+from tradingdesk.account import StaticCash
 from tradingdesk.agents.risk_officer import AccountState
 from tradingdesk.journal import Journal
 from tradingdesk.market import Quote
@@ -20,7 +21,7 @@ def env(make_settings, tmp_path):
     settings = make_settings()
     market = FakeMarket()
     with Journal(tmp_path / "j.db") as journal:
-        p = build_pipeline(settings, journal, market=market, buying_power=10_000)
+        p = build_pipeline(settings, journal, market=market, cash=StaticCash(1000, 10_000))
         yield p, market, journal
 
 
@@ -141,7 +142,7 @@ def test_daily_loss_limit_blocks_everything(env):
 
     class LosingDay:
         def state(self, now):
-            return AccountState(buying_power=10_000, realized_pnl_today=-60)
+            return AccountState(cash=1000, buying_power=10_000, realized_pnl_today=-60)
 
     p.manager.accounts = LosingDay()
     market.add("ABCD")
