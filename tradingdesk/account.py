@@ -59,6 +59,15 @@ class AlpacaCash:
         return CashReading(cash=float(a.cash), buying_power=float(a.buying_power))
 
 
+def _deployed(c) -> float:
+    """$ committed to buys for a traded candidate: actual buy fills, else the approved order."""
+    buys = sum(f.qty * f.price for f in c.fills if f.side == "buy")
+    if buys:
+        return buys
+    shares = (c.human.approved_shares if c.human and c.human.approved_shares else 0)
+    return shares * (c.proposed_trade.entry if c.proposed_trade else 0)
+
+
 class AccountProvider(Protocol):
     def state(self, now: datetime) -> AccountState: ...
 
@@ -92,6 +101,7 @@ class JournalAccountProvider:
         start = self._day_start.setdefault(day, reading.cash)
         today = self.journal.list_candidates(trade_date=day)
         traded = [c for c in today if c.status in _TRADED]
+        deployed = sum(_deployed(c) for c in traded)
         open_ = [c for c in today if c.status in _OPEN]
         return AccountState(
             cash=reading.cash,
@@ -99,6 +109,7 @@ class JournalAccountProvider:
             day_start_cash=start,
             realized_pnl_today=round(sum(c.realized_pnl for c in traded), 2),
             trades_today=len(traded),
+            deployed_today=round(deployed, 2),
             open_positions=len(open_),
             active_tickers=frozenset(c.ticker for c in open_) | self.tickets.pending_tickers(),
         )

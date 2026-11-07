@@ -256,3 +256,61 @@ def test_account_provider_pins_day_start_and_caches(tmp_path):
         cached = JournalAccountProvider(j, TicketQueue(), Counting(), refresh_sec=60)
         cached.state(OPEN_NOW); cached.state(OPEN_NOW)
         assert cached.cash_source.calls == 1
+
+
+# -- cash-account mode (under $5,000) -----------------------------------------------------
+
+def test_cash_mode_below_5000(ro):
+    acct = AccountState(cash=485.50, buying_power=485.50)
+    assert ro.cash_account(acct)
+    d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
+    assert d.ok and d.sizing.limits["account_mode"] == "cash"
+    assert d.sizing.limits["settled_cash_left"] == 485.50
+
+
+def test_margin_mode_from_5000(ro):
+    acct = AccountState(cash=5000, buying_power=20_000)
+    assert not ro.cash_account(acct)
+    d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
+    assert d.ok and d.sizing.limits["account_mode"] == "margin"
+    assert "settled_cash_left" not in d.checks
+
+
+def test_cash_mode_ignores_margin_buying_power(ro):
+    """Under $5k, buying power beyond cash (margin) is never used."""
+    acct = AccountState(cash=50, buying_power=200)          # $10 max position (20% of cash), not 20% of $200
+    d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
+    assert d.ok and d.sizing.shares == 2
+    acct = AccountState(cash=1000, buying_power=4000, day_start_cash=1000, deployed_today=900)
+    d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
+    assert d.ok and d.sizing.shares == 23          # $100 settled left / 4.25
+
+
+def test_settled_cash_used_up(ro):
+    """Sold positions don't free cash until T+1: once the day's cash is deployed, no more buys."""
+    acct = AccountState(cash=1000, buying_power=1000, day_start_cash=1000, deployed_today=998)
+    d = ro.evaluate(challenged(), acct, QUOTE, OPEN_NOW)
+    assert not d.ok and any("settled cash left" in r for r in d.reasons)
+    assert not any("too wide" in r for r in d.reasons)
+
+
+def test_deployed_counts_approved_and_filled(tmp_path):
+    from tests import factories as fac
+    from tradingdesk.account import StaticCash, JournalAccountProvider
+    from tradingdesk.journal import Journal
+    from tradingdesk.models import Fill
+    from tradingdesk.tickets import TicketQueue
+
+    with Journal(tmp_path / "j.db") as j:
+        approved = fac.awaiting_human()
+        approved.record_human(fac.approval(shares=20))                     # 20 x 4.25 = 85.00
+        filled = fac.awaiting_human()
+        filled.record_human(fac.approval(shares=10))
+        filled.add_fill(Fill(side="buy", qty=10, price=4.30, at=fac.T0))   # 43.00 actual
+        filled.transition(CandidateStatus.FILLED, by=Agent.EXECUTOR)
+        passed = fac.awaiting_human()                                      # never approved: not deployed
+        for c in (approved, filled, passed):
+            j.save_candidate(c)
+        state = JournalAccountProvider(j, TicketQueue(), StaticCash(485.5)).state(OPEN_NOW)
+        assert state.deployed_today == 128.0
+        assert state.trades_today == 2

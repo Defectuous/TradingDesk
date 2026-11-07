@@ -86,6 +86,7 @@ class SessionRisk(_Strict):
 
 class RiskConfig(_Strict):
     cash_refresh_sec: float = Field(60, gt=0)
+    cash_account_below_usd: float = Field(5000, ge=0)     # under this: settled cash only, no margin
     max_daily_loss_pct: float = Field(gt=0, le=50)        # % of start-of-day cash
     max_trades_per_day: int = Field(gt=0)
     max_open_positions: int = Field(gt=0)

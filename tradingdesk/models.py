@@ -231,7 +231,7 @@ class RiskSizing(_Frozen):
     position_value: float = Field(ge=0)
     session: TradingSession
     software_managed_stop: bool = False   # True when the broker can't hold the stop (e.g. extended hours)
-    limits: dict[str, float] = {}
+    limits: dict[str, float | str] = {}
 
 
 class HumanDecision(_Frozen):

@@ -10,6 +10,11 @@ Dollar limits are percentages of account cash (config.yaml `risk`):
   per-trade risk and max position  % of current cash
   daily loss limit                 % of the day's first cash reading
 
+Cash-account mode (start-of-day cash below risk.cash_account_below_usd, default $5,000):
+  no margin (buying power capped at cash), and only settled cash can buy. Sale
+  proceeds settle T+1, so the day's total buying is capped at start-of-day cash
+  minus what was already deployed today.
+
 Sizing:
   effective entry = max(proposed entry, current ask/price)   R:R and risk use the *current* price
   shares = floor(min(per-trade risk, remaining daily-loss budget) / risk per share)
@@ -35,6 +40,7 @@ class AccountState:
     realized_pnl_today: float = 0.0
     open_pnl: float = 0.0
     trades_today: int = 0                     # approved trades (filled or working)
+    deployed_today: float = 0.0               # $ of buys approved/filled today (cash-account settlement)
     open_positions: int = 0
     active_tickers: frozenset[str] = frozenset()   # held, working, or a ticket already waiting
 
@@ -81,6 +87,9 @@ class RiskOfficer:
             max_position=round(cash * lim.max_position_pct / 100, 2),
             max_daily_loss=round(max(account.loss_basis, 0.0) * self.cfg.max_daily_loss_pct / 100, 2),
         )
+
+    def cash_account(self, account: AccountState) -> bool:
+        return account.loss_basis < self.cfg.cash_account_below_usd
 
     def daily_loss_hit(self, account: AccountState) -> bool:
         limit = self.dollar_limits("open", account).max_daily_loss
@@ -154,7 +163,17 @@ class RiskOfficer:
         risk_dollars = min(usd.max_risk_per_trade, loss_budget)
         shares = _floor(risk_dollars / rps) if risk_dollars > 0 else 0
         shares = min(shares, _floor(usd.max_position / eff_entry))
-        shares = min(shares, _floor(max(account.buying_power, 0) / eff_entry))
+        cash_mode = self.cash_account(account)
+        spendable = min(account.buying_power, account.cash) if cash_mode else account.buying_power
+        shares = min(shares, _floor(max(spendable, 0) / eff_entry))
+        settled_left = None
+        if cash_mode:
+            settled_left = round(account.loss_basis - account.deployed_today, 2)
+            d.checks["settled_cash_left"] = settled_left
+            shares = min(shares, _floor(max(settled_left, 0) / eff_entry))
+            if settled_left < eff_entry:
+                no(f"cash account: ${max(settled_left, 0):.2f} settled cash left today "
+                   f"(${account.deployed_today:.2f} of ${account.loss_basis:.2f} already used; sales settle T+1)")
         if requested_shares is not None:
             if requested_shares < 1:
                 no("requested size is below 1 share")
@@ -162,7 +181,7 @@ class RiskOfficer:
                 no(f"requested {requested_shares} shares > {shares} allowed now")
             shares = min(shares, requested_shares)
         d.checks["shares"] = shares
-        if shares < 1:
+        if shares < 1 and not (settled_left is not None and settled_left < eff_entry):
             no(f"stop {rps:.2f}/share too wide for ${risk_dollars:.2f} risk / ${usd.max_position:.2f} max position "
                f"(cash ${account.cash:.2f})")
 
@@ -177,7 +196,9 @@ class RiskOfficer:
             # Alpaca can't hold a stop order in extended hours (verified in phase 3).
             software_managed_stop=candidate.session == "premarket",
             limits={
+                "account_mode": "cash" if cash_mode else "margin",
                 "cash": account.cash,
+                **({"settled_cash_left": settled_left} if settled_left is not None else {}),
                 "max_risk_per_trade_usd": usd.max_risk_per_trade,
                 "max_position_usd": usd.max_position,
                 "max_daily_loss_usd": usd.max_daily_loss,

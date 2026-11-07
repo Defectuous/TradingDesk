@@ -27,6 +27,8 @@ sessions:
 # shrink when cash is tied up in an open position.
 risk:
   cash_refresh_sec: 60
+  cash_account_below_usd: 5000  # below this, trade like a cash account: no margin, settled cash only
+                                # (each day's total buys <= start-of-day cash; sales settle T+1)
   max_daily_loss_pct: 6.0       # stop trading for the day at -6% of start-of-day cash
   max_trades_per_day: 5
   max_open_positions: 2
@@ -35,7 +37,7 @@ risk:
     max_position_pct: 10.0
     max_spread_pct: 1.0
     min_volume: 100000          # minimum shares traded so far in the session
-    min_risk_reward: 2.0
+    min_risk_reward: 1.8         # same as open; the 2R target leaves room for a small slip
   open:
     max_risk_per_trade_pct: 2.0   # WTBot: 2% of cash risked per trade
     max_position_pct: 20.0        # WTBot: 20% of cash max per position
