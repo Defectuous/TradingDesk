@@ -42,6 +42,9 @@ risk:
 scout:
   poll_interval_sec: 30
   cooldown_sec: 600             # don't re-emit the same ticker within this window
+  max_movers_per_pass: 25       # only the top N % gainers get a full snapshot each pass
+  universe_refresh_min: 30      # rebuild the price-filtered universe this often
+  workers: 8                    # parallel snapshot/float lookups
   pillars:
     min_rvol: 2.0
     min_daily_change_pct: 10.0
@@ -53,6 +56,19 @@ scout:
     rvol_lookback_days: 30
     rvol_outlier_multiple: 3.0
     strong_momentum_pct: 15.0
+
+# --- Manager: one breakout setup (no strategy selector) ------------------------
+# Breakout level = premarket high (premarket) or high of day (open).
+manager:
+  entry_buffer_pct: 0.1         # entry just above the breakout level
+  stop_lookback_bars: 5         # stop under the low of the last 5 one-minute bars...
+  stop_buffer_pct: 0.2
+  min_stop_pct: 1.0             # ...but never tighter than 1% (WTBot's premarket rule)
+  max_stop_pct: 8.0             # wider stop than this = no trade
+  target_r: 2.0                 # first target = entry + 2 x risk (partial profit)
+  target_2_r: 3.0
+  max_chase_pct: 2.0            # skip if price is already 2% past the entry
+  reject_no_catalyst: true      # Newsie graded "no catalyst" -> no trade (WTBot hard gate)
 
 # --- Trade Desk (local dashboard) --------------------------------------------
 desk:

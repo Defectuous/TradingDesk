@@ -111,7 +111,30 @@ class PillarsConfig(_Strict):
 class ScoutConfig(_Strict):
     poll_interval_sec: float = Field(30, gt=0)
     cooldown_sec: float = Field(600, ge=0)
+    max_movers_per_pass: int = Field(25, ge=1)
+    universe_refresh_min: float = Field(30, gt=0)
+    workers: int = Field(8, ge=1, le=32)
     pillars: PillarsConfig = PillarsConfig()
+
+
+class ManagerConfig(_Strict):
+    """The single breakout setup the Manager proposes (no strategy selector)."""
+
+    entry_buffer_pct: float = Field(0.1, ge=0)    # entry this % above the breakout level
+    stop_lookback_bars: int = Field(5, ge=1)      # stop under the low of the last N 1-min bars
+    stop_buffer_pct: float = Field(0.2, ge=0)
+    min_stop_pct: float = Field(1.0, ge=0)        # never tighter than this % below entry
+    max_stop_pct: float = Field(8.0, gt=0)        # wider than this = no trade
+    target_r: float = Field(2.0, gt=0)            # first target at entry + N x risk
+    target_2_r: float = Field(3.0, gt=0)
+    max_chase_pct: float = Field(2.0, ge=0)       # skip if price already this far past entry
+    reject_no_catalyst: bool = True               # WTBot's hard gate: graded "none" = no trade
+
+    @model_validator(mode="after")
+    def check_stops(self) -> "ManagerConfig":
+        if self.min_stop_pct >= self.max_stop_pct:
+            raise ValueError("manager.min_stop_pct must be below max_stop_pct")
+        return self
 
 
 class DeskConfig(_Strict):
@@ -213,6 +236,7 @@ class AppConfig(_Strict):
     sessions: SessionsConfig = SessionsConfig()
     risk: RiskConfig
     scout: ScoutConfig = ScoutConfig()
+    manager: ManagerConfig = ManagerConfig()
     desk: DeskConfig = DeskConfig()
     broker: BrokerConfig = BrokerConfig()
     trade_manager: TradeManagerConfig = TradeManagerConfig()

@@ -72,14 +72,34 @@ def startup_checks(settings: Settings) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tradingdesk")
-    parser.add_argument("command", nargs="?", default="check", choices=["check"])
+    parser.add_argument("command", nargs="?", default="check", choices=["check", "run"],
+                        help="check = startup checks only; run = Scout -> Manager -> tickets loop")
     parser.add_argument("--config", default=None, help="path to config.yaml")
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument("--once", action="store_true", help="run one scan pass and exit")
+    parser.add_argument("--force-session", choices=["premarket", "open"], default=None,
+                        help="pretend we're in this session (testing outside market hours)")
+    parser.add_argument("--max-symbols", type=int, default=None, help="cap the universe (testing)")
+    parser.add_argument("--buying-power", type=float, default=1000.0,
+                        help="assumed buying power until the broker layer exists (phase 3)")
     args = parser.parse_args(argv)
 
     settings = load_settings(args.config)
     setup_logging(settings.path(settings.config.paths.log_dir), args.log_level)
-    return startup_checks(settings)
+    rc = startup_checks(settings)
+    if rc or args.command == "check":
+        return rc
+
+    from tradingdesk.market import WtbotMarketData
+    from tradingdesk.runner import build_pipeline, run_loop
+
+    with Journal(settings.path(settings.config.paths.journal_db)) as journal:
+        pipeline = build_pipeline(
+            settings, journal, market=WtbotMarketData(max_symbols=args.max_symbols),
+            force_session=args.force_session, buying_power=args.buying_power,
+        )
+        run_loop(pipeline, settings.config.scout.poll_interval_sec, once=args.once)
+    return 0
 
 
 if __name__ == "__main__":

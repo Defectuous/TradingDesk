@@ -112,6 +112,10 @@ class SessionClock:
             return False
         return True
 
+    def force(self, session: TradingSession) -> "SessionClock":
+        """A clock pinned to one session, for testing the pipeline outside market hours."""
+        return _ForcedClock(self.cfg, session)
+
     def next_change(self, dt: datetime) -> tuple[Phase, datetime]:
         """The next phase and when it starts (for the status-bar countdown)."""
         dt = to_et(dt)
@@ -124,3 +128,20 @@ class SessionClock:
         while not self.is_trading_weekday(d):
             d += timedelta(days=1)
         return Phase.STARTUP, datetime.combine(d, self.cfg.startup, ET)
+
+
+class _ForcedClock(SessionClock):
+    """Pretends it is always inside `session`. Only used by `run --force-session`."""
+
+    def __init__(self, cfg: SessionsConfig, session: TradingSession) -> None:
+        super().__init__(cfg)
+        self._session = session
+
+    def phase_at(self, dt: datetime) -> Phase:
+        return Phase.PREMARKET if self._session == "premarket" else Phase.OPEN
+
+    def trading_session_at(self, dt: datetime) -> TradingSession | None:
+        return self._session
+
+    def accepting_new_trades(self, dt: datetime) -> bool:
+        return True

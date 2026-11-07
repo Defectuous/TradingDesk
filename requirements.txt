@@ -6,3 +6,8 @@ tzdata>=2024.1  # zoneinfo data on Windows
 
 # dev / test
 pytest>=8.0
+
+# market data (used through the copied WTBot code)
+alpaca-py>=0.20.0
+pytz>=2024.1
+yfinance>=0.2.40

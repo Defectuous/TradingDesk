@@ -149,6 +149,7 @@ class ScoutData(_Frozen):
     day_open: float | None = None
     premarket_high: float | None = None
     high_of_day: float | None = None
+    key_levels: dict[str, float] = {}         # pm_high, pm_low, hod, lod, vwap... (for the ticket chart/notes)
     pillars: dict[str, PillarCheck]          # e.g. {"rvol": ..., "momentum": ..., "catalyst": ...}
     qualifies_reduced: bool = False           # WTBot's half-size path (missing/vague catalyst)
     halted: bool = False
@@ -201,6 +202,7 @@ class ProposedTrade(_Frozen):
     entry: float = Field(gt=0)
     stop: float = Field(gt=0)
     target: float = Field(gt=0)
+    target_2: float | None = Field(None, gt=0)
     entry_type: Literal["limit", "stop_limit", "marketable_limit"] = "limit"
     strategy: str = ""
 
@@ -208,6 +210,8 @@ class ProposedTrade(_Frozen):
     def check_levels(self) -> "ProposedTrade":
         if not (self.stop < self.entry < self.target):
             raise ValueError(f"long trade needs stop < entry < target (got {self.stop}/{self.entry}/{self.target})")
+        if self.target_2 is not None and self.target_2 <= self.target:
+            raise ValueError("target_2 must be above target")
         return self
 
     @property
@@ -353,8 +357,21 @@ class Candidate(BaseModel):
         new = CandidateStatus(new)
         if new not in ALLOWED_TRANSITIONS[self.status]:
             raise IllegalTransition(f"{self.ticker}: {self.status} -> {new} is not allowed")
+        self._check_gate(new)
         self.status_history = (*self.status_history, StatusChange(status=new, at=at or now_et(), by=by))
         self._set("status", new)
+
+    def _check_gate(self, new: CandidateStatus) -> None:
+        """Gates can't be skipped: moving past a gate needs that gate's own pass verdict."""
+        last = self.verdicts[-1] if self.verdicts else None
+
+        def passed_by(agent: Agent) -> bool:
+            return last is not None and last.agent is agent and last.decision == "pass"
+
+        if new is CandidateStatus.CHALLENGED and not passed_by(Agent.SKEPTIC):
+            raise IllegalTransition(f"{self.ticker}: challenged needs a Skeptic pass as the latest verdict")
+        if new is CandidateStatus.RISK_CLEARED and not (self.risk_sizing and passed_by(Agent.RISK_OFFICER)):
+            raise IllegalTransition(f"{self.ticker}: risk_cleared needs Risk Officer sizing and pass")
 
     # -- verdicts ---------------------------------------------------------------
     def add_verdict(self, verdict: Verdict) -> None:
