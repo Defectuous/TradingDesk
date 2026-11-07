@@ -12,6 +12,11 @@ import yaml
 from tradingdesk.sessions import ET
 from tradingdesk.settings import DEFAULT_CONFIG, Settings, load_settings
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption("--paper", action="store_true", default=False,
+                     help="also run the broker contract tests against the Alpaca PAPER account")
+
+
 PAPER_ENV = {"ALPACA_API_KEY": "PKTEST123", "ALPACA_SECRET_KEY": "secret", "ALPACA_PAPER": "true"}
 
 

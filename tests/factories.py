@@ -81,3 +81,9 @@ def awaiting_human() -> Candidate:
 def approval(shares: int = 47, seconds: float = 12.0) -> HumanDecision:
     return HumanDecision(decision="approved", shown_at=T0, decided_at=T0 + timedelta(seconds=seconds),
                          approved_shares=shares)
+
+
+def approve(c: Candidate, shares: int = 47, seconds: float = 12.0) -> None:
+    """What the Trade Desk does on Approve: click-time re-check pass, then the decision."""
+    c.record_pass(Agent.RISK_RECHECK, ["re-check passed"])
+    c.record_human(approval(shares=shares, seconds=seconds))

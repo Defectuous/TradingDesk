@@ -1,21 +1,32 @@
 """
-Phase 2 pipeline loop: Scout -> Manager (stub Skeptic -> Risk Officer) -> tickets.
+Wiring and the main loops.
 
-Tickets stop at awaiting_human. No orders exist yet (the broker layer is phase 3),
-so nothing can reach the broker from here.
+  scan loop (main thread)      Scout -> Manager (Skeptic -> Risk Officer) -> tickets
+  manage loop (thread)         ticket expiry + Trade Manager tick every poll_interval_sec
+
+Orders only happen through DeskService.approve() (the Trade Desk). The Manager
+has no reference to the Executor.
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 
 from loguru import logger
 
-from tradingdesk.account import AlpacaCash, CashSource, JournalAccountProvider
+from tradingdesk.account import AlpacaCash, BrokerCash, CashSource, JournalAccountProvider
 from tradingdesk.agents.manager import Manager
 from tradingdesk.agents.risk_officer import RiskOfficer
 from tradingdesk.agents.scout import Scout
 from tradingdesk.agents.skeptic import StubSkeptic
+from tradingdesk.alerts import DiscordNotifier, Notifier, NullNotifier
+from tradingdesk.broker import make_broker
+from tradingdesk.broker.base import Broker
+from tradingdesk.desk.service import DeskService
+from tradingdesk.execution.closer import Closer
+from tradingdesk.execution.executor import Executor
+from tradingdesk.execution.trade_manager import TradeManager
 from tradingdesk.journal import Journal
 from tradingdesk.legacy.wtbot import config as wtbot_config
 from tradingdesk.market import MarketData, WtbotMarketData
@@ -32,6 +43,19 @@ class Pipeline:
     manager: Manager
     tickets: TicketQueue
     journal: Journal
+    risk: RiskOfficer
+    accounts: JournalAccountProvider
+    market: MarketData
+
+
+@dataclass
+class App:
+    pipeline: Pipeline
+    broker: Broker
+    trade_manager: TradeManager
+    executor: Executor
+    desk: DeskService
+    notifier: Notifier
 
 
 def build_pipeline(
@@ -40,6 +64,7 @@ def build_pipeline(
     market: MarketData | None = None,
     force_session: TradingSession | None = None,
     cash: CashSource | None = None,
+    broker: Broker | None = None,
 ) -> Pipeline:
     wtbot_config.apply_settings(settings)
     clock = SessionClock(settings.config.sessions)
@@ -48,13 +73,42 @@ def build_pipeline(
     market = market or WtbotMarketData()
     cache = ResearchCache()
     tickets = TicketQueue()
-    cash = cash or AlpacaCash(settings.secrets.alpaca_api_key, settings.secrets.alpaca_secret_key)
+    if cash is None:
+        cash = BrokerCash(broker) if broker else AlpacaCash(settings.secrets.alpaca_api_key,
+                                                             settings.secrets.alpaca_secret_key)
+    accounts = JournalAccountProvider(journal, tickets, cash, settings.config.risk.cash_refresh_sec, broker=broker)
+    risk = RiskOfficer(settings.config.risk, clock)
     scout = Scout(settings, market, cache, clock)
-    manager = Manager(
-        settings.config.manager, cache, StubSkeptic(), RiskOfficer(settings.config.risk, clock),
-        JournalAccountProvider(journal, tickets, cash, settings.config.risk.cash_refresh_sec), market, journal, tickets,
-    )
-    return Pipeline(clock, scout, manager, tickets, journal)
+    manager = Manager(settings.config.manager, cache, StubSkeptic(), risk, accounts, market, journal, tickets)
+    return Pipeline(clock, scout, manager, tickets, journal, risk, accounts, market)
+
+
+def build_app(
+    settings: Settings,
+    journal: Journal,
+    market: MarketData | None = None,
+    broker: Broker | None = None,
+    notifier: Notifier | None = None,
+    force_session: TradingSession | None = None,
+    cash: CashSource | None = None,
+    threaded_closes: bool = True,
+    sleep=time.sleep,
+) -> App:
+    market = market or WtbotMarketData()
+    broker = broker or make_broker(settings, market)
+    p = build_pipeline(settings, journal, market, force_session, cash=cash, broker=broker)
+    if notifier is None:
+        url = settings.secrets.discord_webhook_url
+        notifier = DiscordNotifier(url) if (url and settings.config.alerts.discord_enabled) else NullNotifier()
+    cfg = settings.config
+    closer = Closer(broker, cfg.wind_down, sleep=sleep)
+    tm = TradeManager(broker, closer, journal, notifier, p.clock, cfg.trade_manager, cfg.sessions, cfg.wind_down,
+                      threaded_closes=threaded_closes)
+    executor = Executor(broker, tm, cfg.trade_manager, journal, notifier)
+    tm.executor = executor
+    desk = DeskService(cfg.desk, p.tickets, p.risk, p.accounts, market, executor, tm, journal, notifier)
+    p.manager.on_ticket = desk.on_new_ticket
+    return App(p, broker, tm, executor, desk, notifier)
 
 
 def run_once(p: Pipeline) -> int:
@@ -65,25 +119,49 @@ def run_once(p: Pipeline) -> int:
     return len(hits)
 
 
-def run_loop(p: Pipeline, poll_sec: float, once: bool = False) -> None:
-    while True:
-        now = now_et()
-        phase = p.clock.phase_at(now)
-        if p.clock.accepting_new_trades(now):
+def start_manage_loop(app: App, poll_sec: float, stop: threading.Event) -> threading.Thread:
+    def loop() -> None:
+        while not stop.is_set():
             try:
-                run_once(p)
+                app.desk.expire_stale()
+                app.trade_manager.tick()
             except Exception:
-                logger.exception("scan pass failed")
-            logger.info("tickets waiting: {}", ", ".join(c.ticker for c in p.tickets.pending()) or "none")
-        elif once:
-            logger.warning("{}: not accepting new trades now (use --force-session to test)", phase.label)
-        if once:
-            return
-        if phase is Phase.ENDED:
-            logger.info("session ended")
-            return
-        wait = poll_sec
-        if not p.clock.accepting_new_trades(now):
-            nxt, at = p.clock.next_change(now)
-            wait = min(max((at - now).total_seconds(), 1), 300)
-        time.sleep(wait)
+                logger.exception("manage loop error")
+            stop.wait(poll_sec)
+
+    th = threading.Thread(target=loop, name="trade-manager", daemon=True)
+    th.start()
+    return th
+
+
+def run_loop(app: App, poll_sec: float, once: bool = False) -> None:
+    p = app.pipeline
+    stray = app.trade_manager.reconcile()
+    if stray:
+        logger.warning("untracked broker positions: {}", ", ".join(stray))
+    stop = threading.Event()
+    start_manage_loop(app, app.trade_manager.cfg.poll_interval_sec, stop)
+    try:
+        while True:
+            now = now_et()
+            phase = p.clock.phase_at(now)
+            if p.clock.accepting_new_trades(now):
+                try:
+                    run_once(p)
+                except Exception:
+                    logger.exception("scan pass failed")
+                logger.info("tickets waiting: {}", ", ".join(c.ticker for c in p.tickets.pending()) or "none")
+            elif once:
+                logger.warning("{}: not accepting new trades now (use --force-session to test)", phase.label)
+            if once:
+                return
+            if phase is Phase.ENDED and not app.trade_manager.trades(active_only=True):
+                logger.info("session ended")
+                return
+            wait = poll_sec
+            if not p.clock.accepting_new_trades(now):
+                _, at = p.clock.next_change(now)
+                wait = min(max((at - now).total_seconds(), 1), 60)
+            time.sleep(wait)
+    finally:
+        stop.set()

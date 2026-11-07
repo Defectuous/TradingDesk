@@ -163,7 +163,12 @@ class TradeManagerConfig(_Strict):
     partial_take_fraction: float = Field(0.5, ge=0, le=1)
     trail_after_partial: bool = True
     trail_pct: float = Field(3.0, gt=0)
+    trail_min_step_pct: float = Field(0.25, ge=0)      # don't replace a stop for tiny moves
     poll_interval_sec: float = Field(2, gt=0)
+    entry_limit_slip_pct: float = Field(0.5, ge=0)     # entry limit this % above the trigger
+    entry_timeout_sec: float = Field(30, gt=0)         # premarket entry order: cancel + re-arm after this
+    max_entry_attempts: int = Field(2, ge=1)
+    tighten_to_breakeven: bool = True                  # what tighten_stops_after_cutoff does
 
 
 class WindDownConfig(_Strict):

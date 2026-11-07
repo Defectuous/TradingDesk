@@ -372,6 +372,8 @@ class Candidate(BaseModel):
             raise IllegalTransition(f"{self.ticker}: challenged needs a Skeptic pass as the latest verdict")
         if new is CandidateStatus.RISK_CLEARED and not (self.risk_sizing and passed_by(Agent.RISK_OFFICER)):
             raise IllegalTransition(f"{self.ticker}: risk_cleared needs Risk Officer sizing and pass")
+        if new is CandidateStatus.HUMAN_APPROVED and not passed_by(Agent.RISK_RECHECK):
+            raise IllegalTransition(f"{self.ticker}: approval needs a click-time Risk Officer re-check pass")
 
     # -- verdicts ---------------------------------------------------------------
     def add_verdict(self, verdict: Verdict) -> None:

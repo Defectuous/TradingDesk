@@ -92,14 +92,16 @@ def main(argv: list[str] | None = None) -> int:
 
     from tradingdesk.account import StaticCash
     from tradingdesk.market import WtbotMarketData
-    from tradingdesk.runner import build_pipeline, run_loop
+    from tradingdesk.runner import build_app, run_loop
 
     with Journal(settings.path(settings.config.paths.journal_db)) as journal:
-        pipeline = build_pipeline(
+        app = build_app(
             settings, journal, market=WtbotMarketData(max_symbols=args.max_symbols),
             force_session=args.force_session, cash=StaticCash(args.cash) if args.cash else None,
         )
-        run_loop(pipeline, settings.config.scout.poll_interval_sec, once=args.once)
+        logger.info("Broker: {} (paper={}, dry_run={})", app.broker.name,
+                    app.broker.capabilities().paper, app.broker.capabilities().dry_run)
+        run_loop(app, settings.config.scout.poll_interval_sec, once=args.once)
     return 0
 
 

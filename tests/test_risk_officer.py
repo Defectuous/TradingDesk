@@ -303,9 +303,9 @@ def test_deployed_counts_approved_and_filled(tmp_path):
 
     with Journal(tmp_path / "j.db") as j:
         approved = fac.awaiting_human()
-        approved.record_human(fac.approval(shares=20))                     # 20 x 4.25 = 85.00
+        fac.approve(approved, shares=20)                     # 20 x 4.25 = 85.00
         filled = fac.awaiting_human()
-        filled.record_human(fac.approval(shares=10))
+        fac.approve(filled, shares=10)
         filled.add_fill(Fill(side="buy", qty=10, price=4.30, at=fac.T0))   # 43.00 actual
         filled.transition(CandidateStatus.FILLED, by=Agent.EXECUTOR)
         passed = fac.awaiting_human()                                      # never approved: not deployed

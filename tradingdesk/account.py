@@ -68,12 +68,25 @@ def _deployed(c) -> float:
     return shares * (c.proposed_trade.entry if c.proposed_trade else 0)
 
 
+class BrokerCash:
+    """Cash from whatever Broker is configured (paper Alpaca or the dry-run simulator)."""
+
+    def __init__(self, broker) -> None:
+        self.broker = broker
+
+    def read(self) -> CashReading:
+        a = self.broker.account()
+        return CashReading(cash=a.cash, buying_power=a.buying_power)
+
+
 class AccountProvider(Protocol):
     def state(self, now: datetime) -> AccountState: ...
 
 
 class JournalAccountProvider:
-    def __init__(self, journal: Journal, tickets: TicketQueue, cash: CashSource, refresh_sec: float = 60) -> None:
+    def __init__(self, journal: Journal, tickets: TicketQueue, cash: CashSource, refresh_sec: float = 60,
+                 broker=None) -> None:
+        self.broker = broker                 # when set, real broker positions count too
         self.journal = journal
         self.tickets = tickets
         self.cash_source = cash
@@ -103,6 +116,16 @@ class JournalAccountProvider:
         traded = [c for c in today if c.status in _TRADED]
         deployed = sum(_deployed(c) for c in traded)
         open_ = [c for c in today if c.status in _OPEN]
+        held: set[str] = set()
+        open_pnl = 0.0
+        if self.broker is not None:
+            try:
+                for p in self.broker.positions():
+                    if p.qty > 0:
+                        held.add(p.ticker)
+                        open_pnl += p.unrealized_pl
+            except Exception as exc:
+                logger.warning("positions unavailable for risk check: {}", exc)
         return AccountState(
             cash=reading.cash,
             buying_power=reading.buying_power,
@@ -110,6 +133,7 @@ class JournalAccountProvider:
             realized_pnl_today=round(sum(c.realized_pnl for c in traded), 2),
             trades_today=len(traded),
             deployed_today=round(deployed, 2),
-            open_positions=len(open_),
-            active_tickers=frozenset(c.ticker for c in open_) | self.tickets.pending_tickers(),
+            open_pnl=round(open_pnl, 2),
+            open_positions=max(len(open_), len(held)),
+            active_tickers=frozenset(c.ticker for c in open_) | held | self.tickets.pending_tickers(),
         )

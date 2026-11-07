@@ -9,6 +9,7 @@ The Manager never calls the Executor; only a Trade Desk approval can (phase 3).
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 
 from loguru import logger
@@ -48,6 +49,7 @@ class Manager:
         self.market = market
         self.journal = journal
         self.tickets = tickets
+        self.on_ticket: Callable[[Candidate], None] | None = None   # Trade Desk alert hook
 
     def process(self, hit: ScoutHit, now: datetime) -> Candidate:
         c = hit.candidate
@@ -115,7 +117,12 @@ class Manager:
 
         # 5. ticket for the human
         c.transition(S.AWAITING_HUMAN, by=Agent.MANAGER)
-        self.tickets.add(c)
+        self.tickets.add(c, now)
+        if self.on_ticket:
+            try:
+                self.on_ticket(c)
+            except Exception:
+                logger.exception("ticket alert failed for {}", c.ticker)
 
     @staticmethod
     def _log(c: Candidate) -> None:

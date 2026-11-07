@@ -99,7 +99,12 @@ trade_manager:
   partial_take_fraction: 0.5    # sell this fraction at the first target
   trail_after_partial: true
   trail_pct: 3.0
+  trail_min_step_pct: 0.25      # only move the trailing stop when it improves by this much
   poll_interval_sec: 2
+  entry_limit_slip_pct: 0.5     # entry limit price this % above the breakout trigger
+  entry_timeout_sec: 30         # premarket entry not filled in 30s -> cancel and re-arm
+  max_entry_attempts: 2
+  tighten_to_breakeven: true    # used when sessions.tighten_stops_after_cutoff is on
 
 wind_down:
   close_limit_offset_pct: 0.3   # marketable limit priced this far through the bid

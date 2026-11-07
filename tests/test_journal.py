@@ -31,13 +31,13 @@ def test_save_and_load_candidate(journal):
 def test_resave_updates_row_and_verdicts(journal):
     c = f.awaiting_human()
     journal.save_candidate(c)
-    c.record_human(f.approval(shares=30, seconds=8))
+    f.approve(c, shares=30, seconds=8)
     journal.save_candidate(c)
     rows = journal._conn.execute("SELECT status, human_decision, decision_seconds, shares FROM candidates").fetchall()
     assert len(rows) == 1
     assert tuple(rows[0]) == ("human_approved", "approved", 8.0, 30)
     n = journal._conn.execute("SELECT COUNT(*) FROM verdicts WHERE candidate_id = ?", (c.id,)).fetchone()[0]
-    assert n == len(c.verdicts) == 3
+    assert n == len(c.verdicts) == 4   # scout, skeptic, risk officer, click-time re-check
 
 
 def test_rejected_candidates_are_journaled(journal):

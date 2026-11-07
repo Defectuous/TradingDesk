@@ -35,6 +35,10 @@ dry-run mode; one with neither can't be enabled without `ALLOW_LIVE=true`.
   (`_archive/news_scraper.py`) is not coming back.
 - Additional social platforms beyond X, StockTwits and Reddit.
 
+- Halt detection from Alpaca's market-data trading-status stream (today: asset status +
+  "no trades for 2 minutes during the session" heuristic).
+- Streaming order updates (Alpaca trade_updates) instead of polling every 2s.
+
 ## Carried over from WTBot's roadmap (still relevant)
 
 - Consecutive-loss circuit breaker (pause after N losses in a row).

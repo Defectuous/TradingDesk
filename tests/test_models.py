@@ -110,7 +110,7 @@ def test_reject_ends_chain():
 
 def test_refused_reject_changes_nothing():
     c = f.awaiting_human()
-    c.record_human(f.approval())
+    f.approve(c)
     c.add_fill(Fill(side="buy", qty=47, price=4.25, at=f.T0))
     c.transition(S.FILLED, by=Agent.EXECUTOR)
     before = c.model_dump()
@@ -154,7 +154,7 @@ def test_terminal_statuses():
 
 def test_approval_records_decision_time():
     c = f.awaiting_human()
-    c.record_human(f.approval(shares=47, seconds=12.5))
+    f.approve(c, shares=47, seconds=12.5)
     assert c.status is S.HUMAN_APPROVED
     assert c.human.decision_seconds == 12.5
     assert c.status_history[-1].by is Agent.HUMAN
@@ -163,9 +163,9 @@ def test_approval_records_decision_time():
 def test_reduce_size_allowed_increase_refused():
     c = f.awaiting_human()
     with pytest.raises(ValueError, match="only be reduced"):
-        c.record_human(f.approval(shares=48))
+        f.approve(c, shares=48)
     assert c.status is S.AWAITING_HUMAN and c.human is None
-    c.record_human(f.approval(shares=20))
+    f.approve(c, shares=20)
     assert c.human.approved_shares == 20
 
 
@@ -181,14 +181,14 @@ def test_expired_ticket_cannot_then_be_approved():
     c.record_human(HumanDecision(decision="expired", shown_at=f.T0, decided_at=f.T0 + timedelta(seconds=90)))
     assert c.status is S.EXPIRED and c.status_history[-1].by is Agent.DESK
     with pytest.raises(IllegalTransition):
-        c.record_human(f.approval())
+        f.approve(c)
 
 
 def test_double_approval_refused():
     c = f.awaiting_human()
-    c.record_human(f.approval())
+    f.approve(c)
     with pytest.raises(IllegalTransition):
-        c.record_human(f.approval())
+        f.approve(c)
 
 
 def test_decision_validation():
@@ -216,7 +216,7 @@ def test_bad_long_levels_rejected(entry, stop, target):
 
 def test_fills_and_pnl():
     c = f.awaiting_human()
-    c.record_human(f.approval(shares=40))
+    f.approve(c, shares=40)
     c.add_fill(Fill(side="buy", qty=30, price=4.25, at=f.T0, reason="entry"))
     c.add_fill(Fill(side="buy", qty=10, price=4.27, at=f.T0, reason="entry"))  # partial fills
     c.transition(S.FILLED, by=Agent.EXECUTOR)
@@ -234,11 +234,11 @@ def test_fills_and_pnl():
 
 def test_json_round_trip_keeps_guards():
     c = f.awaiting_human()
-    c.record_human(f.approval())
+    f.approve(c)
     restored = Candidate.model_validate_json(c.model_dump_json())
     assert restored == c
     assert restored.scout.pillars_passed == 5
     with pytest.raises(StageAlreadySet):
         restored.attach("scout", f.scout_data())
     with pytest.raises(IllegalTransition):
-        restored.record_human(f.approval())
+        f.approve(restored)
