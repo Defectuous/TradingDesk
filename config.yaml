@@ -1,0 +1,137 @@
+# TradingDesk configuration. Every limit, threshold, model, interval and endpoint
+# lives here. Secrets live in .env (see .env.example). All times are US/Eastern.
+
+paths:
+  data_dir: data
+  journal_db: data/journal.db
+  log_dir: logs
+
+# --- Trading session (times are HH:MM US/Eastern) ---------------------------
+sessions:
+  startup: "05:30"            # health checks, Newsie/Sentiment start caching
+  premarket_start: "06:00"    # Scout runs on premarket gappers, tickets may appear
+  open: "09:30"               # regular session, normal settings
+  new_trade_cutoff: "11:00"   # no new tickets; waiting tickets expire; unfilled entries cancelled
+  wind_down: "11:30"          # Trade Manager closes anything still open (wind_down_mode: close)
+  market_close: "16:00"       # used when wind_down_mode is "hold"
+  wind_down_mode: close       # close | hold (hold = keep managing until stop/target/close)
+  tighten_stops_after_cutoff: false   # optionally tighten stops between cutoff and wind-down
+  no_entries_first_minutes: 0         # optional "no trading in first N minutes" of each session
+  no_entries_last_minutes: 0          # optional "no trading in last N minutes" before cutoff
+
+# --- Risk Officer hard limits ------------------------------------------------
+# Per-session limits: premarket is stricter (thin volume, wide spreads, software-managed stops).
+risk:
+  max_daily_loss_usd: 60.0      # stop trading for the day when realized+open loss hits this
+  max_trades_per_day: 5
+  max_open_positions: 2
+  premarket:
+    max_risk_per_trade_usd: 10.0
+    max_position_usd: 100.0
+    max_spread_pct: 1.0
+    min_volume: 100000          # minimum shares traded so far in the session
+    min_risk_reward: 2.0
+  open:
+    max_risk_per_trade_usd: 20.0
+    max_position_usd: 200.0
+    max_spread_pct: 1.5
+    min_volume: 250000
+    min_risk_reward: 1.8
+
+# --- Scout: wraps the WTBot 5 Pillars screener (values copied from WTBot .env) ---
+scout:
+  poll_interval_sec: 30
+  cooldown_sec: 600             # don't re-emit the same ticker within this window
+  pillars:
+    min_rvol: 2.0
+    min_daily_change_pct: 10.0
+    min_gap_pct: 5.0
+    min_price: 1.00
+    max_price: 20.00
+    universe_min_price: 0.10
+    max_float_shares: 20000000
+    rvol_lookback_days: 30
+    rvol_outlier_multiple: 3.0
+    strong_momentum_pct: 15.0
+
+# --- Trade Desk (local dashboard) --------------------------------------------
+desk:
+  host: 127.0.0.1               # localhost only by default
+  port: 8765
+  ticket_ttl_sec: 90            # ticket auto-expires after this
+  max_entry_drift_pct: 1.5      # ...or immediately if price moves this far from proposed entry
+  alert_sound: true
+
+# --- Broker --------------------------------------------------------------------
+broker:
+  name: alpaca
+  dry_run: false                # true = log orders, never send them
+  alpaca:
+    paper: true                 # must stay true (startup refuses otherwise without ALLOW_LIVE)
+    data_feed: sip
+
+# --- Trade Manager (after approval, fully automated) ----------------------------
+trade_manager:
+  breakeven_at_r: 1.0           # move stop to breakeven after +1R
+  partial_take_fraction: 0.5    # sell this fraction at the first target
+  trail_after_partial: true
+  trail_pct: 3.0
+  poll_interval_sec: 2
+
+wind_down:
+  close_limit_offset_pct: 0.3   # marketable limit priced this far through the bid
+  retry_interval_sec: 3
+  max_limit_attempts: 5         # then fall back to a market order
+  halt_retry_interval_sec: 15
+
+# --- LLMs ----------------------------------------------------------------------
+llm:
+  daily_spend_cap_usd: 2.00     # when hit: Newsie/Sentiment go local-only, Skeptic auto-rejects
+  spike_warn_multiple: 3.0      # warn when one call's tokens exceed this x the agent's recent average
+  spike_window_calls: 20
+  max_retries: 2                # transport retries only; a parsed response is never re-requested
+  claude:
+    newsie_model: claude-sonnet-5     # same model WTBot's catalyst classifier uses today
+    skeptic_model: claude-opus-5-5
+    newsie_max_tokens: 1024
+    skeptic_max_tokens: 2048
+    timeout_sec: 60
+  local:
+    base_url: http://192.168.1.151:11434/v1   # defectserver Ollama (OpenAI-compatible)
+    model: qwen3:14b
+    thinking: true                # 14b was only reliable on roundups with thinking on
+    fallback_model: qwen3:8b
+    timeout_sec: 120
+  # USD per million tokens. Cache write = 5-minute cache. Local models cost 0.
+  # Unknown models are costed at the most expensive entry here (conservative).
+  pricing:
+    claude-opus-5-5:   {input: 4.00, output: 20.00, cache_write: 5.00, cache_read: 0.20}
+    claude-sonnet-5-5: {input: 2.00, output: 10.00, cache_write: 2.50, cache_read: 0.20}
+    claude-sonnet-5:   {input: 2.00, output: 10.00, cache_write: 2.50, cache_read: 0.20}
+    claude-haiku-5-5:  {input: 0.10, output: 0.50,  cache_write: 0.125, cache_read: 0.01}
+
+# --- Newsie --------------------------------------------------------------------
+news:
+  poll_interval_sec: 60
+  lookback_hours: 24
+  dedup_title_similarity: 0.90
+  rubric_file: prompts/catalyst_rubric.md
+  sources:
+    yahoo:        {enabled: true}
+    google_news:  {enabled: true}
+    edgar:        {enabled: true, forms: ["8-K", "S-1", "S-3", "424B*", "4"], max_requests_per_sec: 5}
+    alpaca_news:  {enabled: false}
+    newsfilter:   {enabled: auto}     # auto = on only when NEWSFILTER_API_KEY is in .env
+
+# --- Sentiment (phase 5) ---------------------------------------------------------
+sentiment:
+  poll_interval_sec: 120
+  regime_symbols: [SPY, QQQ, IWM]
+  vix_symbol: VIX
+  sources:
+    x:          {enabled: false}      # enabled after the X API cost review
+    stocktwits: {enabled: false}
+    reddit:     {enabled: false, subreddits: [wallstreetbets, pennystocks, Daytrading]}
+
+alerts:
+  discord_enabled: true
