@@ -27,6 +27,7 @@ from tradingdesk.desk.service import DeskService
 from tradingdesk.execution.closer import Closer
 from tradingdesk.execution.executor import Executor
 from tradingdesk.execution.trade_manager import TradeManager
+from tradingdesk.health import Health
 from tradingdesk.journal import Journal
 from tradingdesk.legacy.wtbot import config as wtbot_config
 from tradingdesk.market import MarketData, WtbotMarketData
@@ -56,6 +57,8 @@ class App:
     executor: Executor
     desk: DeskService
     notifier: Notifier
+    settings: Settings
+    health: Health
 
 
 def build_pipeline(
@@ -108,12 +111,19 @@ def build_app(
     tm.executor = executor
     desk = DeskService(cfg.desk, p.tickets, p.risk, p.accounts, market, executor, tm, journal, notifier)
     p.manager.on_ticket = desk.on_new_ticket
-    return App(p, broker, tm, executor, desk, notifier)
+    return App(p, broker, tm, executor, desk, notifier, settings, Health())
 
 
-def run_once(p: Pipeline) -> int:
+def run_once(p: Pipeline, health: Health | None = None) -> int:
     now = now_et()
-    hits = p.scout.scan(now)
+    try:
+        hits = p.scout.scan(now)
+    except Exception as exc:
+        if health:
+            health.error("scout", f"scan failed: {exc}")
+        raise
+    if health:
+        health.ok("scout", f"{len(hits)} hit(s)")
     for hit in hits:
         p.manager.process(hit, now)
     return len(hits)
@@ -125,8 +135,10 @@ def start_manage_loop(app: App, poll_sec: float, stop: threading.Event) -> threa
             try:
                 app.desk.expire_stale()
                 app.trade_manager.tick()
-            except Exception:
+                app.health.ok("trade_manager")
+            except Exception as exc:
                 logger.exception("manage loop error")
+                app.health.error("trade_manager", str(exc))
             stop.wait(poll_sec)
 
     th = threading.Thread(target=loop, name="trade-manager", daemon=True)
@@ -134,20 +146,25 @@ def start_manage_loop(app: App, poll_sec: float, stop: threading.Event) -> threa
     return th
 
 
-def run_loop(app: App, poll_sec: float, once: bool = False) -> None:
+def run_loop(app: App, poll_sec: float, once: bool = False, stop: threading.Event | None = None) -> None:
+    """Scan loop. Returns when the session has ended (or after one pass with once=True, or when stop is set)."""
     p = app.pipeline
-    stray = app.trade_manager.reconcile()
+    try:
+        stray = app.trade_manager.reconcile()
+    except Exception as exc:
+        logger.error("could not reconcile broker positions: {}", exc)
+        stray = []
     if stray:
         logger.warning("untracked broker positions: {}", ", ".join(stray))
-    stop = threading.Event()
+    stop = stop or threading.Event()
     start_manage_loop(app, app.trade_manager.cfg.poll_interval_sec, stop)
     try:
-        while True:
+        while not stop.is_set():
             now = now_et()
             phase = p.clock.phase_at(now)
             if p.clock.accepting_new_trades(now):
                 try:
-                    run_once(p)
+                    run_once(p, app.health)
                 except Exception:
                     logger.exception("scan pass failed")
                 logger.info("tickets waiting: {}", ", ".join(c.ticker for c in p.tickets.pending()) or "none")
@@ -162,6 +179,6 @@ def run_loop(app: App, poll_sec: float, once: bool = False) -> None:
             if not p.clock.accepting_new_trades(now):
                 _, at = p.clock.next_change(now)
                 wait = min(max((at - now).total_seconds(), 1), 60)
-            time.sleep(wait)
+            stop.wait(wait)
     finally:
         stop.set()

@@ -33,6 +33,7 @@ class DiscordNotifier:
     def __init__(self, webhook_url: str, max_retries: int = 2) -> None:
         self.url = webhook_url
         self.max_retries = max_retries
+        self.last_error: str | None = None      # shown on the Trade Desk health row
         self._q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=200)
         threading.Thread(target=self._worker, name="discord", daemon=True).start()
 
@@ -56,9 +57,13 @@ class DiscordNotifier:
                         continue
                     if r.status_code >= 400:
                         logger.warning("discord HTTP {}: {}", r.status_code, r.text[:120])
+                        self.last_error = f"HTTP {r.status_code}"
+                    else:
+                        self.last_error = None
                     break
                 except requests.RequestException as exc:
                     logger.warning("discord post failed ({}): {}", attempt + 1, exc)
+                    self.last_error = str(exc)[:120]
                     time.sleep(1 + attempt)
 
 

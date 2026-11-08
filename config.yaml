@@ -84,6 +84,7 @@ desk:
   ticket_ttl_sec: 90            # ticket auto-expires after this
   max_entry_drift_pct: 1.5      # ...or immediately if price moves this far from proposed entry
   alert_sound: true
+  open_browser: true            # open the dashboard in the default browser on start
 
 # --- Broker --------------------------------------------------------------------
 broker:

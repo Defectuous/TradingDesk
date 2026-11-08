@@ -1,9 +1,9 @@
 """
-Entry point.  python -m tradingdesk [check]
+Entry point.
 
-Phase 1 only runs the startup checks: load config + .env, paper-only safety
-check, open the Journal, and report the current session phase. Later phases
-add the agent loop and the Trade Desk.
+  python -m tradingdesk            startup checks only
+  python -m tradingdesk run        agent loops + the Trade Desk dashboard
+  python -m tradingdesk run --no-desk / --once    console only (testing)
 """
 from __future__ import annotations
 
@@ -73,10 +73,12 @@ def startup_checks(settings: Settings) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tradingdesk")
     parser.add_argument("command", nargs="?", default="check", choices=["check", "run"],
-                        help="check = startup checks only; run = Scout -> Manager -> tickets loop")
+                        help="check = startup checks only; run = agent loops + Trade Desk")
     parser.add_argument("--config", default=None, help="path to config.yaml")
     parser.add_argument("--log-level", default="INFO")
-    parser.add_argument("--once", action="store_true", help="run one scan pass and exit")
+    parser.add_argument("--once", action="store_true", help="run one scan pass and exit (no dashboard)")
+    parser.add_argument("--no-desk", action="store_true",
+                        help="console only: no dashboard (tickets can't be approved)")
     parser.add_argument("--force-session", choices=["premarket", "open"], default=None,
                         help="pretend we're in this session (testing outside market hours)")
     parser.add_argument("--max-symbols", type=int, default=None, help="cap the universe (testing)")
@@ -101,7 +103,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         logger.info("Broker: {} (paper={}, dry_run={})", app.broker.name,
                     app.broker.capabilities().paper, app.broker.capabilities().dry_run)
-        run_loop(app, settings.config.scout.poll_interval_sec, once=args.once)
+        poll = settings.config.scout.poll_interval_sec
+        if args.once or args.no_desk:
+            run_loop(app, poll, once=args.once)
+        else:
+            from tradingdesk.desk.server import serve
+
+            serve(app, poll)
     return 0
 
 

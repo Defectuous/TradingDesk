@@ -145,6 +145,7 @@ class DeskConfig(_Strict):
     ticket_ttl_sec: float = Field(90, gt=0)
     max_entry_drift_pct: float = Field(1.5, gt=0)
     alert_sound: bool = True
+    open_browser: bool = True
 
 
 class AlpacaConfig(_Strict):
