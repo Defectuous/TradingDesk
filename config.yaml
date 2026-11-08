@@ -122,7 +122,7 @@ llm:
   claude:
     newsie_model: claude-sonnet-5     # same model WTBot's catalyst classifier uses today
     skeptic_model: claude-opus-5-5
-    newsie_max_tokens: 1024
+    newsie_max_tokens: 2048        # sonnet-5 thinks even at low effort; 1024 could run out before the JSON (WTBot)
     skeptic_max_tokens: 2048
     timeout_sec: 60
   local:
@@ -143,12 +143,21 @@ llm:
 news:
   poll_interval_sec: 60
   lookback_hours: 24
-  dedup_title_similarity: 0.90
-  rubric_file: prompts/catalyst_rubric.md
+  dedup_title_similarity: 0.90       # same story if normalized titles are this similar (or same URL)
+  rubric_file: prompts/catalyst_rubric.md   # the A-F rubric (edit freely)
+  types_file: prompts/catalyst_types.md     # WTBot's catalyst type guide
+  max_headlines_to_grade: 5          # freshest relevant headlines sent to Claude per ticker
+  watch_minutes: 90                  # keep researching a ticker this long after it was last a mover
+  max_watch: 40                      # most tickers researched at once (biggest movers first)
+  workers: 4                         # parallel source fetches
+  local_filter:                      # qwen first pass: drop headlines that aren't about this ticker or material
+    enabled: true
+    thinking: false
   sources:
     yahoo:        {enabled: true}
     google_news:  {enabled: true}
-    edgar:        {enabled: true, forms: ["8-K", "S-1", "S-3", "424B*", "4"], max_requests_per_sec: 5}
+    edgar:        {enabled: true, forms: ["8-K", "S-1", "S-3", "F-1", "F-3", "424B*", "4"],
+                   max_requests_per_sec: 5, lookback_days: 3}   # needs SEC_USER_AGENT in .env
     alpaca_news:  {enabled: false}
     newsfilter:   {enabled: auto}     # auto = on only when NEWSFILTER_API_KEY is in .env
 

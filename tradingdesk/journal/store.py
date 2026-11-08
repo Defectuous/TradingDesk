@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from tradingdesk.llm.costs import LLMUsage
-from tradingdesk.models import Candidate, CandidateStatus
+from tradingdesk.models import Candidate, CandidateStatus, NewsData
 from tradingdesk.sessions import ET, now_et
 
 SCHEMA_VERSION = 1
@@ -88,6 +88,18 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     candidate_id       TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_llm_date_agent ON llm_usage(trade_date, agent);
+
+-- Newsie's latest grade per ticker per day, keyed by the fingerprint of the headline set it graded,
+-- so a restart doesn't pay to grade the same stories again.
+CREATE TABLE IF NOT EXISTS news_grades (
+    trade_date  TEXT NOT NULL,
+    ticker      TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    graded_at   TEXT NOT NULL,
+    grade       TEXT NOT NULL,
+    data        TEXT NOT NULL,
+    PRIMARY KEY (trade_date, ticker)
+);
 """
 
 
@@ -211,6 +223,23 @@ class Journal:
         with self._lock:
             rows = self._conn.execute(sql + " ORDER BY id", args).fetchall()
         return [{**dict(r), "detail": json.loads(r["detail"])} for r in rows]
+
+    # -- Newsie grades ---------------------------------------------------------------
+    def save_news_grade(self, ticker: str, fingerprint: str, news: NewsData) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO news_grades(trade_date, ticker, fingerprint, graded_at, grade, data) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (news.graded_at.astimezone(ET).date().isoformat(), ticker.upper(), fingerprint,
+                 news.graded_at.isoformat(), news.catalyst_grade, news.model_dump_json()),
+            )
+
+    def news_grades(self, trade_date: str) -> dict[str, tuple[str, NewsData]]:
+        """{ticker: (fingerprint, NewsData)} graded on trade_date."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ticker, fingerprint, data FROM news_grades WHERE trade_date = ?", (trade_date,)).fetchall()
+        return {r["ticker"]: (r["fingerprint"], NewsData.model_validate_json(r["data"])) for r in rows}
 
     # -- LLM usage -------------------------------------------------------------------
     def log_llm_usage(self, u: LLMUsage) -> None:

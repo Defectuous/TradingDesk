@@ -71,7 +71,7 @@ def test_ticket_renders_and_approve_sends_once(rig):
 
     async def scenario(user):
         await user.should_see("ABCD", retries=30)
-        await user.should_see("Catalyst pending (Newsie: phase 4)")
+        await user.should_see("Catalyst pending (Newsie hasn't graded it yet)")
         await user.should_see("stub Skeptic (phase 2): no review yet")
         assert len(list(_buttons(user, exclude=("kill",)))) == 2      # Approve + Pass (helper sanity)
         user.find(marker="approve:ABCD").click()

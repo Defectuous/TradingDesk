@@ -220,11 +220,22 @@ class SourceToggle(BaseModel):
     enabled: bool | Literal["auto"] = False
 
 
+class LocalFilterConfig(_Strict):
+    enabled: bool = True
+    thinking: bool = False            # a yes/no relevance call; thinking mostly adds latency here
+
+
 class NewsConfig(_Strict):
     poll_interval_sec: float = 60
     lookback_hours: int = 24
     dedup_title_similarity: float = Field(0.90, gt=0, le=1)
     rubric_file: Path = Path("prompts/catalyst_rubric.md")
+    types_file: Path = Path("prompts/catalyst_types.md")
+    max_headlines_to_grade: int = Field(5, ge=1, le=15)
+    watch_minutes: float = Field(90, gt=0)     # keep researching a ticker this long after it was last a mover
+    max_watch: int = Field(40, ge=1)
+    workers: int = Field(4, ge=1, le=16)
+    local_filter: LocalFilterConfig = LocalFilterConfig()
     sources: dict[str, SourceToggle] = {}
 
 

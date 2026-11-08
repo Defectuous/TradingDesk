@@ -380,7 +380,8 @@ class TicketCard:
                     with ui.row().classes("gap-2 items-baseline no-wrap"):
                         ui.badge(h.grade or "?", color="grey-7")
                         (ui.link(h.title, h.url, new_tab=True) if h.url else ui.label(h.title)).classes("text-sm")
-                        ui.label(f"{h.published} · {', '.join(h.sources)}").classes("text-xs opacity-60")
+                        via = (f"{h.outlet} via " if h.outlet and h.outlet != "SEC EDGAR" else "") + ", ".join(h.sources)
+                        ui.label(f"{h.published} · {via}").classes("text-xs opacity-60")
                 if t.filing_flags:
                     with ui.row().classes("gap-1"):
                         for f in t.filing_flags:

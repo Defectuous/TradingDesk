@@ -47,7 +47,7 @@ def test_ticket_shows_everything(rig):
     assert t.risk_reward == c.proposed_trade.risk_reward
     assert {p.name for p in t.pillars} == set(c.scout.pillars)
     assert t.objections and "stub" in t.objections[0]          # the Skeptic's case, even on a pass
-    assert t.catalyst_badge.startswith("Catalyst pending")       # Newsie arrives in phase 4
+    assert t.catalyst_badge.startswith("Catalyst pending")       # no Newsie grade cached
     assert t.seconds_left == pytest.approx(80) and t.ttl == 90
     assert t.live_price == 4.95 and t.drift_pct is not None
 
@@ -75,7 +75,7 @@ def test_status_bar(rig):
     assert s.llm_spend == pytest.approx(0.25) and s.llm_cap == 2.0
     assert s.broker.endswith("(dry-run)")
     names = {h.name: h.state for h in s.health}
-    assert names["Broker"] == "ok" and names["Newsie"] == "off" and names["Discord"] == "off"
+    assert names["Broker"] == "ok" and names["Newsie"] == "warn" and names["Discord"] == "off"   # no pass yet
 
 
 def test_loss_limit_disables_approvals(rig, monkeypatch):
@@ -161,3 +161,15 @@ def test_chart_svg():
     assert svg.startswith("<svg") and svg.endswith("</svg>")
     assert svg.count("<rect") == 10 and "entry 5" in svg and "stop 4.87" in svg and "target 5.26" in svg
     assert chart_svg([], 5.0, 4.87, 5.26) == ""
+
+
+def test_ticket_shows_newsie_grade_and_sources(rig):
+    from tests.factories import news_data
+
+    n = news_data()
+    rig.app.pipeline.cache.put_news("ABCD", n.model_copy(update={"graded_at": OPEN_NOW}))
+    rig.ticket(OPEN_NOW)
+    [t] = rig.view.build(OPEN_NOW).tickets
+    assert t.catalyst_badge == "Catalyst A · FDA" and t.grade_reason == n.grade_reason
+    [h] = t.headlines
+    assert h.grade == "A" and h.sources == ("google_news",)

@@ -14,7 +14,12 @@ The only edits are import lines:
 | `pillar_checks.py` | Ross Cameron 5 Pillars (Scout). Logic unchanged; don't edit without asking. |
 | `alpaca_client.py` | Snapshots, RVOL with outlier trimming, bars, quotes, universe |
 | `technical_levels.py` | Premarket high/low, high of day, VWAP, bars |
-| `yahoo_news.py` | Float share lookup (and Yahoo news for Newsie in phase 4) |
+| `yahoo_news.py` | Float share lookup, and Yahoo news for Newsie |
+| `google_news.py` | Google News RSS for Newsie (copied 2026-11-08 from WTBot commit `abc2ed8`) |
 
 Not copied: `strategy_selector.py`. The Manager uses one breakout setup instead
 (decided 2026-11-07), so there is no per-pass Claude strategy call.
+
+Also reused for Newsie, copied into `tradingdesk/news/flags.py` without logic changes: WTBot's roundup /
+ticker-named checks (`ai_catalyst.py`), keyword flags (`news_flags.py`) and junk-stub regex
+(`llm_tweaks/prompts.py`). `llm_tweaks/edgar.py` was ported to `tradingdesk/news/edgar.py`.

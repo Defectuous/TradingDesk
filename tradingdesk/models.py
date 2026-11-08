@@ -122,6 +122,7 @@ class Headline(_Frozen):
     url: str = ""
     published_at: datetime
     also_seen_in: tuple[str, ...] = ()   # other sources carrying the same story (after dedup)
+    outlet: str = ""                     # publisher as the source reports it, e.g. "GlobeNewswire"
 
     check_ts = field_validator("published_at")(_aware)
 

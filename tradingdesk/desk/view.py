@@ -50,6 +50,7 @@ class HeadlineView:
     sources: tuple[str, ...]
     url: str
     published: str
+    outlet: str = ""
 
 
 @dataclass(frozen=True)
@@ -198,8 +199,9 @@ def ticket_view(c: Candidate, seconds_left: float, ttl: float, quote: Quote | No
         if ff.forms:
             flags.append("forms: " + ", ".join(ff.forms))
     heads = tuple(
-        HeadlineView(g.headline.title, g.grade, (g.headline.source, *g.headline.also_seen_in), g.headline.url,
-                     f"{g.headline.published_at.astimezone(ET):%a %H:%M}")
+        HeadlineView(g.headline.title, "SEC" if g.headline.source == "edgar" else g.grade,
+                     (g.headline.source, *g.headline.also_seen_in), g.headline.url,
+                     f"{g.headline.published_at.astimezone(ET):%a %H:%M}", g.headline.outlet)
         for g in (n.headlines if n else ())
     )
     objections = tuple(reason for v in c.verdicts if v.agent is Agent.SKEPTIC for reason in v.reasons)
@@ -211,7 +213,9 @@ def ticket_view(c: Candidate, seconds_left: float, ttl: float, quote: Quote | No
         price=sc.price, change_pct=sc.change_pct, relative_volume=sc.relative_volume,
         float_shares=sc.float_shares, spread_pct=sc.spread_pct,
         pillars=tuple(PillarView(k, p.passed, _fmt_pillar(k, p)) for k, p in sc.pillars.items()),
-        catalyst_badge=f"Catalyst {n.catalyst_grade} · {n.catalyst_type}" if n else "Catalyst pending (Newsie: phase 4)",
+        catalyst_badge=(f"Catalyst {n.catalyst_grade} · {n.catalyst_type}"
+                        + ("" if n.graded_by == "claude" else f" ({n.graded_by})")) if n
+        else "Catalyst pending (Newsie hasn't graded it yet)",
         catalyst_grade=n.catalyst_grade if n else None,
         grade_reason=n.grade_reason if n else "",
         headlines=heads, filing_flags=tuple(flags),
@@ -413,10 +417,40 @@ class DeskView:
             rows.append(HealthRow("Discord", "warn" if last else "ok", last or "webhook set"))
         else:
             rows.append(HealthRow("Discord", "off", "no webhook (DISCORD_WEBHOOK_URL)"))
-        rows.append(HealthRow("Newsie", "off", "phase 4"))
+        rows.append(self._newsie_health(now))
         rows.append(HealthRow("Sentiment", "off", "phase 5"))
         rows.append(HealthRow("Skeptic", "warn", "stub, always passes (phase 6)"))
         return rows
+
+    def _newsie_health(self, now: datetime) -> HealthRow:
+        newsie = getattr(self.app, "newsie", None)
+        if newsie is None:
+            return HealthRow("Newsie", "off", "not running")
+        h = self.app.health
+        phase = self.app.pipeline.clock.phase_at(now)
+        if phase not in (Phase.STARTUP, Phase.PREMARKET, Phase.OPEN):
+            return HealthRow("Newsie", "off", "polls only during Startup / Premarket / Open")
+        parts, state = [], "ok"
+        for src in newsie.sources:
+            b = h.get(f"news:{src.name}")
+            if b is None:
+                parts.append(f"{src.name}: waiting")
+            elif b.ok:
+                parts.append(f"{src.name}: ok")
+            else:
+                parts.append(f"{src.name}: ERROR {b.detail[:60]}")
+                state = "warn"
+        parts += [f"{name}: off ({why})" for name, why in newsie.status().items()]
+        b = h.get("newsie")
+        if b is None:
+            state, lead = ("warn", "no pass yet")
+        elif not b.ok:
+            state, lead = "error", b.detail
+        else:
+            age = (now - b.at).total_seconds()
+            stale = age > self.settings.config.news.poll_interval_sec * 10 + 120
+            state, lead = ("warn" if stale or state == "warn" else "ok"), f"{b.detail} ({age:.0f}s ago)"
+        return HealthRow("Newsie", state, lead + " | " + "; ".join(parts))
 
     def _summary(self, now: datetime) -> list[str]:
         s = self.app.trade_manager.last_summary

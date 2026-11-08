@@ -3,7 +3,7 @@
 A team of agents around the WTBot 5 Pillars momentum screener. **Paper trading only.
 A human approves every trade** on the Trade Desk; nothing reaches the broker before that.
 
-Build plan: [trading_team_build_prompt.md](trading_team_build_prompt.md). Status: phase 3 done (broker, execution, trade management, NiceGUI Trade Desk); phase 4 (Newsie) next.
+Build plan: [trading_team_build_prompt.md](trading_team_build_prompt.md). Status: phase 4 done (Newsie: news sources, EDGAR, local filter, Claude catalyst grades); phase 5 (Sentiment) next.
 
 ## Setup
 
@@ -47,6 +47,27 @@ machines to reach it. Everything updates live, once a second.
 - New tickets beep (browsers only allow sound after your first click on the page)
   and send a Discord alert.
 
+## Newsie
+
+Runs in the background during Startup / Premarket / Open; the Scout and Manager only read its cache.
+
+1. **Watchlist**: the Scout's top movers each pass (and premarket movers during Startup), biggest first.
+2. **Sources** (each fails on its own): Yahoo Finance, Google News RSS, SEC EDGAR. Alpaca News and
+   Newsfilter are built but off. EDGAR needs `SEC_USER_AGENT` in `.env`.
+3. **Dedup** across sources (same URL or ≥90% similar titles), earliest time kept, other sources listed.
+4. **Free filters**: WTBot's junk-stub and roundup rules, then qwen (local) drops headlines that aren't about
+   the ticker or aren't material. It fails open (keeps everything) if the server is down.
+5. **Grade only when the relevant headlines change**: Claude (`llm.claude.newsie_model`, structured JSON,
+   cached system prompt, effort low). Over the daily spend cap, or if Claude fails: WTBot's hints2 local
+   setup. If that fails too: keyword rules.
+6. **Rubric rules enforced in code**: news older than the session (before the previous close) drops one
+   grade; an offering filed today (EDGAR offering forms / 8-K 3.02, or an offering headline) caps at D.
+7. Grades go to the cache and the Journal (`news_grades`), so a restart doesn't pay twice. Every LLM call is
+   logged with tokens and cost (`llm_usage`).
+
+On tickets: the grade badge (with "(local)" / "(rules)" when Claude didn't grade it), the one-sentence
+reason, each headline's grade, publisher and which sources carried it, SEC filings, and filing flags.
+
 ## Layout
 
 ```
@@ -67,6 +88,12 @@ tradingdesk/
   desk/ui.py             the NiceGUI page: renders snapshots, buttons call desk/service.py
   desk/server.py         serves the dashboard; runs the scan + manage loops in background threads
   health.py              heartbeats for the status bar's feed/agent health
+  news/                  Newsie: sources, edgar, dedup, flags (WTBot keyword rules), local_llm (Ollama),
+                         grader (Claude / local / rules + relevance filter), newsie (watchlist + loop)
+prompts/
+  catalyst_rubric.md     the A-F rubric Newsie grades with (edit freely)
+  catalyst_types.md      WTBot's catalyst type guide (from its Claude classifier prompt)
+  local_catalyst_hints2.md  WTBot's best local-model prompt, byte for byte (used when the spend cap is hit)
   alerts.py              Discord webhook (notification only)
 tests/
   broker_contract/       every Broker must pass these

@@ -31,6 +31,7 @@ from tradingdesk.health import Health
 from tradingdesk.journal import Journal
 from tradingdesk.legacy.wtbot import config as wtbot_config
 from tradingdesk.market import MarketData, WtbotMarketData
+from tradingdesk.news.newsie import Newsie, build_newsie
 from tradingdesk.research_cache import ResearchCache
 from tradingdesk.sessions import Phase, SessionClock, TradingSession, now_et
 from tradingdesk.settings import Settings
@@ -47,6 +48,7 @@ class Pipeline:
     risk: RiskOfficer
     accounts: JournalAccountProvider
     market: MarketData
+    cache: ResearchCache
 
 
 @dataclass
@@ -59,6 +61,7 @@ class App:
     notifier: Notifier
     settings: Settings
     health: Health
+    newsie: Newsie | None = None
 
 
 def build_pipeline(
@@ -83,7 +86,7 @@ def build_pipeline(
     risk = RiskOfficer(settings.config.risk, clock)
     scout = Scout(settings, market, cache, clock)
     manager = Manager(settings.config.manager, cache, StubSkeptic(), risk, accounts, market, journal, tickets)
-    return Pipeline(clock, scout, manager, tickets, journal, risk, accounts, market)
+    return Pipeline(clock, scout, manager, tickets, journal, risk, accounts, market, cache)
 
 
 def build_app(
@@ -96,6 +99,7 @@ def build_app(
     cash: CashSource | None = None,
     threaded_closes: bool = True,
     sleep=time.sleep,
+    with_newsie: bool = True,
 ) -> App:
     market = market or WtbotMarketData()
     broker = broker or make_broker(settings, market)
@@ -111,7 +115,12 @@ def build_app(
     tm.executor = executor
     desk = DeskService(cfg.desk, p.tickets, p.risk, p.accounts, market, executor, tm, journal, notifier)
     p.manager.on_ticket = desk.on_new_ticket
-    return App(p, broker, tm, executor, desk, notifier, settings, Health())
+    health = Health()
+    newsie = None
+    if with_newsie:
+        newsie = build_newsie(settings, journal, p.cache, p.clock, health)
+        p.scout.on_movers = newsie.watch
+    return App(p, broker, tm, executor, desk, notifier, settings, health, newsie)
 
 
 def run_once(p: Pipeline, health: Health | None = None) -> int:
@@ -158,10 +167,17 @@ def run_loop(app: App, poll_sec: float, once: bool = False, stop: threading.Even
         logger.warning("untracked broker positions: {}", ", ".join(stray))
     stop = stop or threading.Event()
     start_manage_loop(app, app.trade_manager.cfg.poll_interval_sec, stop)
+    if app.newsie is not None and not once:
+        app.newsie.start(stop)
     try:
         while not stop.is_set():
             now = now_et()
             phase = p.clock.phase_at(now)
+            if phase is Phase.STARTUP and app.newsie is not None:
+                try:                                 # let Newsie research premarket movers before tickets
+                    p.scout.peek_movers()
+                except Exception:
+                    logger.exception("startup movers peek failed")
             if p.clock.accepting_new_trades(now):
                 try:
                     run_once(p, app.health)
@@ -176,7 +192,9 @@ def run_loop(app: App, poll_sec: float, once: bool = False, stop: threading.Even
                 logger.info("session ended")
                 return
             wait = poll_sec
-            if not p.clock.accepting_new_trades(now):
+            if phase is Phase.STARTUP:
+                wait = min(poll_sec * 2, max((p.clock.next_change(now)[1] - now).total_seconds(), 1))
+            elif not p.clock.accepting_new_trades(now):
                 _, at = p.clock.next_change(now)
                 wait = min(max((at - now).total_seconds(), 1), 60)
             stop.wait(wait)

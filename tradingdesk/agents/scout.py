@@ -10,6 +10,7 @@ grade yet, it uses WTBot's existing "no news = neutral" path.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -91,6 +92,23 @@ class Scout:
         self.clock = clock
         self.universe = UniverseCache(market, self.cfg.universe_refresh_min)
         self._last_emitted: dict[str, datetime] = {}
+        self.on_movers: Callable[[list[str]], None] | None = None   # Newsie's watchlist feed
+
+    def _movers(self) -> list:
+        p = self.cfg.pillars
+        movers = self.market.movers(
+            self.universe.get(), min(p.min_gap_pct, p.min_daily_change_pct), self.cfg.max_movers_per_pass
+        )
+        if self.on_movers and movers:
+            try:
+                self.on_movers([m.ticker for m in movers])
+            except Exception:
+                logger.exception("scout: movers hook failed")
+        return movers
+
+    def peek_movers(self) -> list[str]:
+        """Top movers without evaluating them (used during Startup so Newsie can research early)."""
+        return [m.ticker for m in self._movers()]
 
     def _cooling_down(self, ticker: str, now: datetime) -> bool:
         last = self._last_emitted.get(ticker)
@@ -100,10 +118,7 @@ class Scout:
         session = self.clock.trading_session_at(now)
         if session is None:
             return []
-        p = self.cfg.pillars
-        movers = self.market.movers(
-            self.universe.get(), min(p.min_gap_pct, p.min_daily_change_pct), self.cfg.max_movers_per_pass
-        )
+        movers = self._movers()
         todo = [m.ticker for m in movers if not self._cooling_down(m.ticker, now)]
         if not todo:
             return []

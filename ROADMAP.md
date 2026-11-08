@@ -27,9 +27,11 @@ dry-run mode; one with neither can't be enabled without `ALLOW_LIVE=true`.
 
 - Approve tickets from my phone (Discord buttons or a mobile-friendly Trade Desk), with
   the same click-time Risk Officer re-check.
-- Re-enable **Alpaca News** once it's reliable. Likely cause of the empty results today:
-  WTBot's `NewsRequest(exclude_contentless=True)` drops headline-only items, which is most
-  small-cap wire news (about 76% of WTBot's calls returned 0 articles).
+- Re-enable **Alpaca News** once it's reliable. Likely cause of WTBot's empty results:
+  `NewsRequest(exclude_contentless=True)` drops headline-only items, which is most small-cap
+  wire news (about 76% of WTBot's calls returned 0 articles). TradingDesk's `alpaca_news`
+  source already asks with `exclude_contentless=False`; it's off until tested
+  (`news.sources.alpaca_news.enabled`).
 - Re-enable **Newsfilter.io** once its subscription site lets me sign up for API access.
   Use the official key-based API only; WTBot's old login-and-scrape approach
   (`_archive/news_scraper.py`) is not coming back.

@@ -4,6 +4,7 @@ python-dotenv>=1.0
 loguru>=0.7.2
 tzdata>=2024.1  # zoneinfo data on Windows
 requests>=2.31
+anthropic>=2.6         # Newsie grading (Skeptic in phase 6)
 
 # Trade Desk dashboard (3.19 tested; 4.x not yet)
 nicegui>=3.19,<4
