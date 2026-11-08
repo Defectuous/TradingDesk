@@ -75,7 +75,10 @@ def test_ticket_renders_and_approve_sends_once(rig):
         await user.should_see("stub Skeptic (phase 2): no review yet")
         assert len(list(_buttons(user, exclude=("kill",)))) == 2      # Approve + Pass (helper sanity)
         user.find(marker="approve:ABCD").click()
-        user.find(marker="approve:ABCD").click()             # double click
+        await user.should_see(marker="approve-confirm:ABCD", retries=10)
+        assert c.status is S.AWAITING_HUMAN and rig.submits() == []   # nothing sent before Confirm
+        user.find(marker="approve-confirm:ABCD").click()
+        user.find(marker="approve-confirm:ABCD").click()     # double click on Confirm
         await until(lambda: c.status is S.HUMAN_APPROVED)
         await user.should_see(marker="result:ABCD", content="approved", retries=30)
 
@@ -93,10 +96,29 @@ def test_reduce_size_and_note(rig):
         size.clear().type("10")
         user.find(marker="note:ABCD").type("half size, extended")
         user.find(marker="approve:ABCD").click()
+        await user.should_see("Buy 10 ABCD?", retries=10)
+        await user.should_see(f"{10 * c.proposed_trade.risk_per_share:,.2f}")    # $ at risk for 10 sh
+        user.find(marker="approve-confirm:ABCD").click()
         await until(lambda: c.status is S.HUMAN_APPROVED)
 
     run(rig, scenario)
     assert c.human.approved_shares == 10 and c.human.note == "half size, extended"
+
+
+def test_cancel_in_confirm_dialog_sends_nothing(rig):
+    c = rig.ticket(OPEN_NOW)
+
+    async def scenario(user):
+        await user.should_see(marker="approve:ABCD", retries=30)
+        user.find(marker="approve:ABCD").click()
+        await user.should_see(marker="approve-cancel:ABCD", retries=10)
+        user.find(marker="approve-cancel:ABCD").click()
+        await asyncio.sleep(0.3)
+        btn = next(iter(user.find(marker="approve:ABCD").elements))
+        assert btn.enabled                                   # ticket still open for a decision
+
+    run(rig, scenario)
+    assert c.status is S.AWAITING_HUMAN and rig.submits() == []
 
 
 def test_size_above_max_refused_in_page(rig):

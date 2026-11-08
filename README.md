@@ -35,7 +35,8 @@ copy .env.example .env      # then fill in keys
 machines to reach it. Everything updates live, once a second.
 
 - **Tickets**: everything about the trade in one card, with a countdown. Approve,
-  Pass (optional note) or lower the share count. Size can only go down; the stop
+  Pass (optional note) or lower the share count. Approve opens a confirmation with the
+  shares, levels and $ at risk; nothing is sent until you confirm. Size can only go down; the stop
   can't be edited. Approve re-checks risk at click time, and double clicks send one order.
 - **Open positions**: live P&L, stop, targets, "software-managed stop" and
   "stuck — halted" flags, a Flatten button per position (with confirm).

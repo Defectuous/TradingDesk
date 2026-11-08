@@ -406,7 +406,7 @@ class TicketCard:
                                   precision=0, on_change=self._size_changed).classes("w-40").mark(f"size:{t.ticker}")
             self.note = ui.input("Note (optional)", validation={"max 200 chars": lambda v: len(v or "") <= 200}) \
                 .classes("grow").mark(f"note:{t.ticker}")
-            self.approve_btn = ui.button("Approve", on_click=self._approve, icon="check") \
+            self.approve_btn = ui.button("Approve", on_click=self._confirm_approve, icon="check") \
                 .props("color=positive unelevated").mark(f"approve:{t.ticker}")
             self.pass_btn = ui.button("Pass", on_click=self._pass, icon="close").props("color=grey-8 unelevated").mark(f"pass:{t.ticker}")
         self.result_lbl = ui.label("").classes("text-sm font-bold").mark(f"result:{t.ticker}")
@@ -462,12 +462,39 @@ class TicketCard:
         for el in (self.approve_btn, self.pass_btn, self.size, self.note):
             el.enable()
 
-    async def _approve(self) -> None:
+    def _confirm_approve(self) -> None:
+        """Approve opens a summary; nothing is sent until Confirm. The Risk Officer re-check runs on Confirm."""
         if self.done:
             return
         shares = self.requested_shares()
         if shares is None:
             self.page.report(f"Approve {self.t.ticker}", f"size must be 1–{self.t.shares}", ok=False)
+            return
+        t = self.t
+        with ui.dialog() as dlg, ui.card().classes("min-w-[320px]"):
+            ui.label(f"Buy {shares} {t.ticker}?").classes("text-lg font-bold")
+            if t.premarket:
+                ui.badge("PREMARKET", color="deep-orange")
+            with ui.grid(columns=2).classes("gap-x-6 gap-y-1 td-mono"):
+                for k, v in (("Entry", _price(t.entry)), ("Stop", _price(t.stop)),
+                             ("Target", _price(t.target)), ("R:R", f"{t.risk_reward:.2f}"),
+                             ("$ at risk", _money(shares * t.risk_per_share)),
+                             ("Position", _money(shares * t.entry))):
+                    ui.label(k).classes("td-k")
+                    ui.label(v).classes("font-bold")
+            if t.software_managed_stop:
+                ui.label("Stop is software-managed (the broker can't hold it in extended hours).") \
+                    .classes("text-sm text-warning")
+            ui.label("Risk is re-checked against the live price when you confirm.").classes("text-xs opacity-70")
+            with ui.row().classes("w-full justify-end"):
+                ui.button("Cancel", on_click=dlg.close).props("flat").mark(f"approve-cancel:{t.ticker}")
+                ui.button(f"Confirm buy {shares}", on_click=lambda: self._approve(dlg, shares), icon="check") \
+                    .props("color=positive unelevated").mark(f"approve-confirm:{t.ticker}")
+        dlg.open()
+
+    async def _approve(self, dlg: Any, shares: int) -> None:
+        dlg.close()
+        if self.done:                          # second click on Confirm, or ticket already decided
             return
         self._lock("sending…")
         res = await run.io_bound(self.page.desk.approve, self.t.id, shares, self.note.value or None)
