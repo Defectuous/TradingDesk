@@ -17,6 +17,7 @@ class ResearchCache:
         self._lock = threading.Lock()
         self._news: dict[str, NewsData] = {}
         self._sentiment: dict[str, SentimentData] = {}
+        self._regime: tuple[str, dict, datetime] | None = None
         self._max_age = max_age
 
     def _fresh(self, ts: datetime, now: datetime | None) -> bool:
@@ -39,3 +40,16 @@ class ResearchCache:
         with self._lock:
             d = self._sentiment.get(ticker.upper())
         return d if d and self._fresh(d.as_of, now) else None
+
+    # market-wide regime, so a ticker without its own social reading still gets it
+    def put_regime(self, regime: str, detail: dict, as_of: datetime) -> None:
+        with self._lock:
+            self._regime = (regime, detail, as_of)
+
+    def regime(self, now: datetime | None = None) -> SentimentData | None:
+        """Regime-only SentimentData (no buzz) if a fresh regime reading exists."""
+        with self._lock:
+            r = self._regime
+        if r is None or (now or now_et()) - r[2] > timedelta(minutes=30):
+            return None
+        return SentimentData(market_regime=r[0], regime_detail=r[1], as_of=r[2])

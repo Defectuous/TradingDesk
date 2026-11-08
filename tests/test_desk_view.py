@@ -173,3 +173,17 @@ def test_ticket_shows_newsie_grade_and_sources(rig):
     assert t.catalyst_badge == "Catalyst A · FDA" and t.grade_reason == n.grade_reason
     [h] = t.headlines
     assert h.grade == "A" and h.sources == ("google_news",)
+
+
+def test_ticket_shows_buzz_regime_and_promo(rig):
+    from tradingdesk.models import SentimentData
+
+    rig.app.pipeline.cache.put_sentiment("ABCD", SentimentData(
+        buzz_score=40, buzz_trend="rising", promo_warning=True, promo_reasons=("4 of 6 recent posts look like promotion",),
+        crowd_score=78, crowd_label="EXTREMELY_BULLISH", tone=0.5, sources=("stocktwits",),
+        market_regime="hostile", regime_detail={"summary": "SPY -1.2%, VIX 27.0"}, as_of=OPEN_NOW))
+    rig.ticket(OPEN_NOW)
+    [t] = rig.view.build(OPEN_NOW).tickets
+    assert t.buzz == "40/100 · rising · StockTwits 78 extremely bullish · tone +0.50"
+    assert t.regime == "hostile (SPY -1.2%, VIX 27.0)"
+    assert t.promo_warning and t.promo_reasons == ("4 of 6 recent posts look like promotion",)

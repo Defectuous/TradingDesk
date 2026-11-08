@@ -161,15 +161,35 @@ news:
     alpaca_news:  {enabled: false}
     newsfilter:   {enabled: auto}     # auto = on only when NEWSFILTER_API_KEY is in .env
 
-# --- Sentiment (phase 5) ---------------------------------------------------------
+# --- Sentiment ---------------------------------------------------------------------
+# Crowd buzz from social sources (only tickers on the Scout's radar) + market regime (plain Python).
 sentiment:
-  poll_interval_sec: 120
-  regime_symbols: [SPY, QQQ, IWM]
-  vix_symbol: VIX
+  poll_interval_sec: 120             # each watched ticker at most once per poll (StockTwits: 1 call per ticker)
+  watch_minutes: 90
+  max_watch: 20
+  trend_points: 10                   # buzz change on the 0-100 scale that counts as rising / fading
+  trend_lookback_min: 10
+  promo_share: 0.3                   # >= 30% of recent posts look like promotion -> promo warning for the Skeptic
+  local_tone:                        # qwen tone scoring of recent posts (free, local)
+    enabled: true
+    thinking: false
+  regime:
+    symbols: [SPY, QQQ, IWM]
+    vix_symbol: "^VIX"               # Yahoo symbol; Alpaca has no index data (best effort)
+    sma_days: 20
+    up_day_pct: 0.3
+    down_day_pct: -0.5
+    vix_calm: 18
+    vix_fear: 25
+    vix_spike_pct: 8
+    supportive_at: 3
+    hostile_at: -3
+    refresh_sec: 120
   sources:
-    x:          {enabled: false}      # enabled after the X API cost review
-    stocktwits: {enabled: false}
-    reddit:     {enabled: false, subreddits: [wallstreetbets, pennystocks, Daytrading]}
+    stocktwits: {enabled: true, token_file: data/stocktwits_token.json}   # official MCP server; log in with
+                                                                          # `python -m tradingdesk stocktwits-login`
+    x:          {enabled: false}     # waiting on the X API cost decision
+    reddit:     {enabled: false, subreddits: [wallstreetbets, pennystocks, Daytrading]}   # waiting on Reddit approval
 
 alerts:
   discord_enabled: true

@@ -32,6 +32,7 @@ from tradingdesk.journal import Journal
 from tradingdesk.legacy.wtbot import config as wtbot_config
 from tradingdesk.market import MarketData, WtbotMarketData
 from tradingdesk.news.newsie import Newsie, build_newsie
+from tradingdesk.social.sentiment import Sentiment, build_sentiment
 from tradingdesk.research_cache import ResearchCache
 from tradingdesk.sessions import Phase, SessionClock, TradingSession, now_et
 from tradingdesk.settings import Settings
@@ -62,6 +63,7 @@ class App:
     settings: Settings
     health: Health
     newsie: Newsie | None = None
+    sentiment: Sentiment | None = None
 
 
 def build_pipeline(
@@ -116,11 +118,13 @@ def build_app(
     desk = DeskService(cfg.desk, p.tickets, p.risk, p.accounts, market, executor, tm, journal, notifier)
     p.manager.on_ticket = desk.on_new_ticket
     health = Health()
-    newsie = None
+    newsie = sentiment = None
     if with_newsie:
         newsie = build_newsie(settings, journal, p.cache, p.clock, health)
-        p.scout.on_movers = newsie.watch
-    return App(p, broker, tm, executor, desk, notifier, settings, health, newsie)
+        sentiment = build_sentiment(settings, journal, p.cache, p.clock, health)
+        watchers = [newsie.watch, sentiment.watch]
+        p.scout.on_movers = lambda tickers: [w(tickers) for w in watchers]
+    return App(p, broker, tm, executor, desk, notifier, settings, health, newsie, sentiment)
 
 
 def run_once(p: Pipeline, health: Health | None = None) -> int:
@@ -167,8 +171,10 @@ def run_loop(app: App, poll_sec: float, once: bool = False, stop: threading.Even
         logger.warning("untracked broker positions: {}", ", ".join(stray))
     stop = stop or threading.Event()
     start_manage_loop(app, app.trade_manager.cfg.poll_interval_sec, stop)
-    if app.newsie is not None and not once:
-        app.newsie.start(stop)
+    if not once:
+        for agent in (app.newsie, app.sentiment):
+            if agent is not None:
+                agent.start(stop)
     try:
         while not stop.is_set():
             now = now_et()

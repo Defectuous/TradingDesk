@@ -334,6 +334,9 @@ class TicketCard:
                 ui.badge("PREMARKET", color="deep-orange")
             grade_color = {"A": "positive", "B": "light-green", "C": "amber", "D": "orange", "F": "negative"}
             ui.badge(t.catalyst_badge, color=grade_color.get(t.catalyst_grade or "", "grey"))
+            if t.promo_warning:
+                ui.badge("PROMO WARNING", color="negative").tooltip(
+                    "; ".join(t.promo_reasons) or "coordinated promotion detected in social posts")
             if t.software_managed_stop:
                 ui.badge("stop is software-managed", color="warning").tooltip(
                     "The broker can't hold this stop in extended hours; the Trade Manager watches it.")

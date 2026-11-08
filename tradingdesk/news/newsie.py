@@ -38,6 +38,7 @@ from tradingdesk.news.grader import (GRADES, ClaudeGrader, GradeError, GradeInpu
 from tradingdesk.news.sources import NewsSource
 from tradingdesk.research_cache import ResearchCache
 from tradingdesk.sessions import ET, Phase, SessionClock, now_et
+from tradingdesk.watchlist import Watchlist
 
 _ACTIVE = (Phase.STARTUP, Phase.PREMARKET, Phase.OPEN)
 _OFFERING_FLAGS = {"offering", "private_placement", "share_issuance", "warrants", "convertible", "financing"}
@@ -78,9 +79,7 @@ class Newsie:
         self.spend_cap = spend_cap_usd
         self.off_sources = off_sources or {}
         self.now = now_fn
-        self._lock = threading.Lock()
-        self._watch: dict[str, datetime] = {}           # ticker -> last time it was a mover
-        self._priority: list[str] = []                  # latest mover order (biggest first)
+        self._watch = Watchlist(cfg.watch_minutes, cfg.max_watch)
         self._fingerprints: dict[str, str] = {}
         self._keep: dict[tuple[str, str], bool] = {}    # (ticker, story) -> relevance verdict
         self._wake = threading.Event()
@@ -89,25 +88,11 @@ class Newsie:
 
     # -- watchlist -----------------------------------------------------------------------------
     def watch(self, tickers: list[str], now: datetime | None = None) -> None:
-        now = now or self.now()
-        with self._lock:
-            new = [t for t in tickers if t not in self._watch]
-            for t in tickers:
-                self._watch[t] = now
-            self._priority = list(dict.fromkeys(tickers))
-        if new:
+        if self._watch.add(tickers, now or self.now()):
             self._wake.set()
 
     def watchlist(self, now: datetime | None = None) -> list[str]:
-        now = now or self.now()
-        cutoff = now - timedelta(minutes=self.cfg.watch_minutes)
-        with self._lock:
-            for t in [t for t, seen in self._watch.items() if seen < cutoff]:
-                del self._watch[t]
-            rest = sorted((t for t in self._watch if t not in self._priority), key=lambda t: self._watch[t],
-                          reverse=True)
-            order = [t for t in self._priority if t in self._watch] + rest
-        return order[: self.cfg.max_watch]
+        return self._watch.current(now or self.now())
 
     # -- loop ----------------------------------------------------------------------------------------
     def start(self, stop: threading.Event) -> threading.Thread:

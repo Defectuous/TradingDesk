@@ -35,6 +35,15 @@ dry-run mode; one with neither can't be enabled without `ALLOW_LIVE=true`.
 - Re-enable **Newsfilter.io** once its subscription site lets me sign up for API access.
   Use the official key-based API only; WTBot's old login-and-scrape approach
   (`_archive/news_scraper.py`) is not coming back.
+- **X** (decide before wiring in): pay-per-use only now, $0.005 per post read (deduplicated within a
+  24-hour UTC window), capped at 3M reads/month before Enterprise (official pricing page, 2026-11-08).
+  Estimate for cashtag searches on 20 watched tickers every 2 minutes, 5:30-11:00 with ~2-10 new posts per
+  poll: ~6,600-33,000 reads a day = ~$33-165/day (~$700-3,500/month). Narrowed to the top 5 movers every
+  5 minutes: ~$15/day. Whether recent search's `$TICKER` operator is available on pay-per-use isn't stated
+  in the official docs; confirm before building. StockTwits already covers the trader crowd for free.
+- **Reddit**: new API access needs approval under Reddit's Responsible Builder Policy (self-service app
+  creation is closed). Request access with a dedicated account describing the personal, read-only use; the
+  source stays off until approved.
 - Additional social platforms beyond X, StockTwits and Reddit.
 - Halt detection from Alpaca's market-data trading-status stream (today: asset status +
   "no trades for 2 minutes during the session" heuristic).

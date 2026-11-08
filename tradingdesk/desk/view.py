@@ -71,6 +71,8 @@ class TicketView:
     filing_flags: tuple[str, ...]
     buzz: str
     regime: str
+    promo_warning: bool
+    promo_reasons: tuple[str, ...]
     entry: float
     stop: float
     target: float
@@ -219,9 +221,11 @@ def ticket_view(c: Candidate, seconds_left: float, ttl: float, quote: Quote | No
         catalyst_grade=n.catalyst_grade if n else None,
         grade_reason=n.grade_reason if n else "",
         headlines=heads, filing_flags=tuple(flags),
-        buzz=(f"{se.buzz_score:g} · {se.buzz_trend}" + (" · PROMO WARNING" if se.promo_warning else "")) if se
-        else "pending (Sentiment: phase 5)",
-        regime=se.market_regime if se else "pending",
+        buzz=buzz_text(se),
+        regime=(se.market_regime + (f" ({se.regime_detail['summary']})" if se.regime_detail.get("summary") else ""))
+        if se else "pending",
+        promo_warning=bool(se and se.promo_warning),
+        promo_reasons=se.promo_reasons if se else (),
         entry=t.entry, stop=t.stop, target=t.target, target_2=t.target_2,
         risk_reward=t.risk_reward, risk_per_share=t.risk_per_share,
         shares=r.shares, dollars_at_risk=r.dollars_at_risk, position_value=r.position_value,
@@ -230,6 +234,19 @@ def ticket_view(c: Candidate, seconds_left: float, ttl: float, quote: Quote | No
         live_price=quote.price if quote else None, drift_pct=drift, max_drift_pct=max_drift,
         strategy=t.strategy,
     )
+
+
+def buzz_text(se) -> str:
+    if se is None:
+        return "pending (Sentiment hasn't read it yet)"
+    if se.buzz_score is None:
+        return "no social data" + (f" ({', '.join(se.sources)})" if se.sources else "")
+    bits = [f"{se.buzz_score:g}/100 · {se.buzz_trend}"]
+    if se.crowd_score is not None:
+        bits.append(f"StockTwits {se.crowd_score:g} {(se.crowd_label or '').replace('_', ' ').lower()}".rstrip())
+    if se.tone is not None:
+        bits.append(f"tone {se.tone:+.2f}")
+    return " · ".join(bits)
 
 
 def rejected_view(c: Candidate) -> RejectedView:
@@ -417,22 +434,27 @@ class DeskView:
             rows.append(HealthRow("Discord", "warn" if last else "ok", last or "webhook set"))
         else:
             rows.append(HealthRow("Discord", "off", "no webhook (DISCORD_WEBHOOK_URL)"))
-        rows.append(self._newsie_health(now))
-        rows.append(HealthRow("Sentiment", "off", "phase 5"))
+        rows.append(self._agent_health(now, "Newsie", "newsie", "news", self.settings.config.news.poll_interval_sec))
+        rows.append(self._agent_health(now, "Sentiment", "sentiment", "social",
+                                       self.settings.config.sentiment.poll_interval_sec))
         rows.append(HealthRow("Skeptic", "warn", "stub, always passes (phase 6)"))
         return rows
 
-    def _newsie_health(self, now: datetime) -> HealthRow:
-        newsie = getattr(self.app, "newsie", None)
-        if newsie is None:
-            return HealthRow("Newsie", "off", "not running")
+    def _agent_health(self, now: datetime, label: str, attr: str, prefix: str, poll_sec: float) -> HealthRow:
+        agent = getattr(self.app, attr, None)
+        if agent is None:
+            return HealthRow(label, "off", "not running")
         h = self.app.health
         phase = self.app.pipeline.clock.phase_at(now)
         if phase not in (Phase.STARTUP, Phase.PREMARKET, Phase.OPEN):
-            return HealthRow("Newsie", "off", "polls only during Startup / Premarket / Open")
+            return HealthRow(label, "off", "polls only during Startup / Premarket / Open")
         parts, state = [], "ok"
-        for src in newsie.sources:
-            b = h.get(f"news:{src.name}")
+        if attr == "sentiment":
+            rb = h.get("regime")
+            parts.append("regime: waiting" if rb is None else (f"regime: {rb.detail}" if rb.ok
+                                                               else f"regime: ERROR {rb.detail[:60]}"))
+        for src in agent.sources:
+            b = h.get(f"{prefix}:{src.name}")
             if b is None:
                 parts.append(f"{src.name}: waiting")
             elif b.ok:
@@ -440,17 +462,17 @@ class DeskView:
             else:
                 parts.append(f"{src.name}: ERROR {b.detail[:60]}")
                 state = "warn"
-        parts += [f"{name}: off ({why})" for name, why in newsie.status().items()]
-        b = h.get("newsie")
+        parts += [f"{name}: off ({why})" for name, why in agent.status().items()]
+        b = h.get(attr)
         if b is None:
             state, lead = ("warn", "no pass yet")
         elif not b.ok:
             state, lead = "error", b.detail
         else:
             age = (now - b.at).total_seconds()
-            stale = age > self.settings.config.news.poll_interval_sec * 10 + 120
+            stale = age > poll_sec * 10 + 120
             state, lead = ("warn" if stale or state == "warn" else "ok"), f"{b.detail} ({age:.0f}s ago)"
-        return HealthRow("Newsie", state, lead + " | " + "; ".join(parts))
+        return HealthRow(label, state, lead + " | " + "; ".join(parts))
 
     def _summary(self, now: datetime) -> list[str]:
         s = self.app.trade_manager.last_summary

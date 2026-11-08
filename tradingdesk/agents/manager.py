@@ -68,7 +68,7 @@ class Manager:
     def _run(self, c: Candidate, hit: ScoutHit, now: datetime) -> None:
         # 1. research from the background cache (never a fresh LLM call)
         news = self.cache.news(c.ticker, now)
-        sentiment = self.cache.sentiment(c.ticker, now)
+        sentiment = self.cache.sentiment(c.ticker, now) or self.cache.regime(now)   # regime-only if no social read
         if news:
             c.attach("news", news)
         if sentiment:

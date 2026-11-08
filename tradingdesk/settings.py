@@ -239,10 +239,29 @@ class NewsConfig(_Strict):
     sources: dict[str, SourceToggle] = {}
 
 
+class RegimeConfig(_Strict):
+    symbols: list[str] = ["SPY", "QQQ", "IWM"]
+    vix_symbol: str = "^VIX"                  # Yahoo symbol (Alpaca has no index data); best effort
+    sma_days: int = Field(20, ge=5, le=200)
+    up_day_pct: float = 0.3                   # an index up at least this much today counts as supportive
+    down_day_pct: float = -0.5                # ...down at least this much counts as hostile
+    vix_calm: float = 18.0
+    vix_fear: float = 25.0
+    vix_spike_pct: float = 8.0                # VIX up this much today counts as hostile
+    supportive_at: int = 3                    # total score >= this -> supportive
+    hostile_at: int = -3                      # total score <= this -> hostile
+    refresh_sec: float = Field(120, gt=0)
+
+
 class SentimentConfig(_Strict):
     poll_interval_sec: float = 120
-    regime_symbols: list[str] = ["SPY", "QQQ", "IWM"]
-    vix_symbol: str = "VIX"
+    watch_minutes: float = Field(90, gt=0)
+    max_watch: int = Field(20, ge=1)
+    trend_points: float = Field(10, gt=0)     # buzz change (0-100 scale) that counts as rising / fading
+    trend_lookback_min: float = Field(10, gt=0)
+    promo_share: float = Field(0.3, gt=0, le=1)   # share of recent posts flagged as promotion -> warning
+    local_tone: LocalFilterConfig = LocalFilterConfig()
+    regime: RegimeConfig = RegimeConfig()
     sources: dict[str, SourceToggle] = {}
 
 

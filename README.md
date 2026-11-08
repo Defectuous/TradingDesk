@@ -3,7 +3,7 @@
 A team of agents around the WTBot 5 Pillars momentum screener. **Paper trading only.
 A human approves every trade** on the Trade Desk; nothing reaches the broker before that.
 
-Build plan: [trading_team_build_prompt.md](trading_team_build_prompt.md). Status: phase 4 done (Newsie: news sources, EDGAR, local filter, Claude catalyst grades); phase 5 (Sentiment) next.
+Build plan: [trading_team_build_prompt.md](trading_team_build_prompt.md). Status: phase 5 done (Sentiment: StockTwits via its official MCP server, promo checks, market regime); phase 6 (Skeptic) next.
 
 ## Setup
 
@@ -23,6 +23,7 @@ copy .env.example .env      # then fill in keys
 .venv\Scripts\python.exe -m tradingdesk run                  # agents + Trade Desk at http://127.0.0.1:8765
 .venv\Scripts\python.exe -m tradingdesk run --force-session open --cash 1000   # desk outside market hours
 .venv\Scripts\python.exe -m tradingdesk run --no-desk         # console only (can't approve)
+.venv\Scripts\python.exe -m tradingdesk stocktwits-login      # one-time browser login for Sentiment
 .venv\Scripts\python.exe -m tradingdesk run --once --force-session open   # one scan pass, any time
 .venv\Scripts\python.exe -m pytest                           # tests (offline)
 .venv\Scripts\python.exe -m pytest tests/broker_contract --paper   # broker contract vs Alpaca PAPER
@@ -68,6 +69,24 @@ Runs in the background during Startup / Premarket / Open; the Scout and Manager 
 On tickets: the grade badge (with "(local)" / "(rules)" when Claude didn't grade it), the one-sentence
 reason, each headline's grade, publisher and which sources carried it, SEC filings, and filing flags.
 
+## Sentiment
+
+Runs alongside Newsie (Startup / Premarket / Open), only for tickers on the Scout's radar.
+
+- **StockTwits**, through StockTwits' official MCP server (https://ai.stocktwits.com) with your account:
+  one `get_symbol_pulse` call per ticker per poll (sentiment score, chatter level now vs. normal, watchers,
+  newest posts). That's the "approved API" route StockTwits' Terms (section 5) allow; it never posts.
+  Log in once with `python -m tradingdesk stocktwits-login`; the token lives in `data/` and refreshes itself.
+  Rate-limited? It rests (retry-after, or 5 min; an hour after three in a row).
+- **Promotion checks** (plain Python): near-identical posts, one account flooding the stream, pump language,
+  new accounts when known. A promo warning discounts buzz and is flagged for the Skeptic, never as bullish.
+- **Tone**: qwen labels recent posts bullish / bearish / neutral (free, local; skipped if the server is down).
+- **Buzz** = chatter level (0-100) discounted by the promo share; **trend** = rising / flat / fading vs. the
+  reading 10 minutes ago (or StockTwits' day level before that).
+- **Market regime** (plain Python): SPY / QQQ / IWM vs. their 20-day average and today's move, plus the VIX
+  (from Yahoo; Alpaca has no index data). Every ticket gets it, even without a social reading.
+- **Not wired in**: X (paid API, see the cost note in ROADMAP), Reddit (needs Reddit's approval).
+
 ## Layout
 
 ```
@@ -88,6 +107,9 @@ tradingdesk/
   desk/ui.py             the NiceGUI page: renders snapshots, buttons call desk/service.py
   desk/server.py         serves the dashboard; runs the scan + manage loops in background threads
   health.py              heartbeats for the status bar's feed/agent health
+  social/                Sentiment: stocktwits_mcp (official MCP + OAuth login), stocktwits source, spam
+                         (promo checks), tone (qwen), regime (SPY/QQQ/IWM + VIX), sentiment (watchlist + loop)
+  watchlist.py           movers the background agents research
   news/                  Newsie: sources, edgar, dedup, flags (WTBot keyword rules), local_llm (Ollama),
                          grader (Claude / local / rules + relevance filter), newsie (watchlist + loop)
 prompts/

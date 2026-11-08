@@ -186,9 +186,15 @@ class NewsData(_Frozen):
 
 
 class SentimentData(_Frozen):
-    buzz_score: float = Field(ge=0)
-    buzz_trend: Literal["rising", "flat", "fading"]
-    promo_warning: bool = False      # coordinated promotion / bot pattern detected
+    buzz_score: float | None = Field(None, ge=0)   # 0-100 chatter level, spam-discounted; None = no social data
+    buzz_trend: Literal["rising", "flat", "fading", "unknown"] = "unknown"
+    promo_warning: bool = False      # coordinated promotion / bot pattern detected (a Skeptic warning, not bullish)
+    promo_reasons: tuple[str, ...] = ()
+    crowd_score: float | None = Field(None, ge=0, le=100)   # platform's own bull/bear score (StockTwits 0-100)
+    crowd_label: str | None = None                          # e.g. "EXTREMELY_BULLISH"
+    tone: float | None = Field(None, ge=-1, le=1)           # local-model tone of recent posts, -1 bearish .. +1 bullish
+    sources: tuple[str, ...] = ()                           # social sources that answered, e.g. ("stocktwits",)
+    detail: dict[str, Any] = {}
     market_regime: Literal["supportive", "neutral", "hostile"]
     regime_detail: dict[str, Any] = {}
     as_of: datetime

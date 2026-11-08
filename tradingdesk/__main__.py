@@ -8,6 +8,7 @@ Entry point.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from loguru import logger
@@ -70,9 +71,27 @@ def startup_checks(settings: Settings) -> int:
     return 0
 
 
+def stocktwits_login(settings: Settings) -> int:
+    """One-time browser login to StockTwits' official MCP server, then list what it offers."""
+    from tradingdesk.social.stocktwits_mcp import StockTwitsMCP, TokenStore, login
+
+    store = TokenStore(settings.path(settings.config.paths.data_dir) / "stocktwits_token.json")
+    try:
+        login(store)
+        tools = StockTwitsMCP(store).tools()
+    except Exception as exc:
+        logger.error("StockTwits login failed: {}", exc)
+        return 1
+    logger.success("StockTwits connected; token saved to {}", store.path)
+    for t in tools:
+        logger.info("tool {}: {} | input: {}", t.get("name"), (t.get("description") or "").strip()[:400],
+                    json.dumps(t.get("inputSchema", {}).get("properties", {}))[:600])
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tradingdesk")
-    parser.add_argument("command", nargs="?", default="check", choices=["check", "run"],
+    parser.add_argument("command", nargs="?", default="check", choices=["check", "run", "stocktwits-login"],
                         help="check = startup checks only; run = agent loops + Trade Desk")
     parser.add_argument("--config", default=None, help="path to config.yaml")
     parser.add_argument("--log-level", default="INFO")
@@ -88,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings(args.config)
     setup_logging(settings.path(settings.config.paths.log_dir), args.log_level)
+    if args.command == "stocktwits-login":
+        return stocktwits_login(settings)
     rc = startup_checks(settings)
     if rc or args.command == "check":
         return rc
