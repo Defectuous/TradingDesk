@@ -69,8 +69,12 @@ def startup_checks(settings: Settings) -> int:
     if missing:
         logger.warning("Not set in .env: {}", ", ".join(missing))
     desk = settings.config.desk
-    logger.info("Trade Desk: {}:{} - login {}", desk.host, desk.port,
-                "on" if settings.secrets.desk_password_hash else "off (localhost only)")
+    from tradingdesk.desk.auth import LOCAL_HOSTS
+
+    login = ("on" if settings.secrets.desk_password_hash
+             else "off" if desk.host in LOCAL_HOSTS
+             else "NOT SET - `run` will refuse; use set-desk-password")
+    logger.info("Trade Desk: {}:{} - login {}", desk.host, desk.port, login)
     logger.success("Startup checks passed")
     return 0
 
