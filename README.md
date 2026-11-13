@@ -15,6 +15,7 @@ copy .env.example .env      # then fill in keys
 
 - Secrets go in `.env`. Everything else goes in `config.yaml`.
 - Startup refuses to run if anything points at live trading, unless `ALLOW_LIVE=true` is set.
+- The Trade Desk only listens off localhost if a login password is set (see Trade Desk below).
 
 ## Run
 
@@ -24,6 +25,7 @@ copy .env.example .env      # then fill in keys
 .venv\Scripts\python.exe -m tradingdesk run --force-session open --cash 1000   # desk outside market hours
 .venv\Scripts\python.exe -m tradingdesk run --no-desk         # console only (can't approve)
 .venv\Scripts\python.exe -m tradingdesk stocktwits-login      # one-time browser login for Sentiment
+.venv\Scripts\python.exe -m tradingdesk set-desk-password     # Trade Desk login (needed off localhost)
 .venv\Scripts\python.exe -m tradingdesk run --once --force-session open   # one scan pass, any time
 .venv\Scripts\python.exe -m pytest                           # tests (offline)
 .venv\Scripts\python.exe -m pytest tests/broker_contract --paper   # broker contract vs Alpaca PAPER
@@ -34,6 +36,18 @@ copy .env.example .env      # then fill in keys
 `run` opens the dashboard in your browser (`desk.open_browser`). It binds to
 `127.0.0.1` by default (`desk.host`); set it to a LAN address only if you want other
 machines to reach it. Everything updates live, once a second.
+
+**Login.** Set a password with `python -m tradingdesk set-desk-password` (12+ characters, prompted, never
+echoed), then restart. Off localhost the desk refuses to start without one.
+
+- Only an Argon2id hash is stored, in `.env` as `DESK_PASSWORD_HASH`.
+- Sessions: a random token in an HttpOnly, SameSite=Lax cookie; the server keeps only its SHA-256, in
+  memory. A session lasts until the trading day ends (the Ended phase), 24 hours at most. Restarting the
+  desk logs everyone out. **Log out** in the header ends it; open tabs notice within 5 seconds.
+- Every route and the websocket the buttons use are gated; only `/login` is open. Websocket and POST
+  requests from another site are refused.
+- 5 wrong passwords from one IP in 15 minutes lock that IP out for 15 minutes and send a Discord alert.
+- **No HTTPS yet**: on the LAN the password and cookie travel unencrypted.
 
 - **Tickets**: everything about the trade in one card, with a countdown. Approve,
   Pass (optional note) or lower the share count. Approve opens a confirmation with the

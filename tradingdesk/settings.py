@@ -313,6 +313,7 @@ class Secrets(BaseModel):
     reddit_client_secret: str = Field("", repr=False)
     reddit_user_agent: str = ""
     stocktwits_access_token: str = Field("", repr=False)
+    desk_password_hash: str = Field("", repr=False)
     # Only the exact string "true" (any case) enables live trading. Never set by code.
     allow_live: bool = False
 
@@ -335,6 +336,7 @@ class Secrets(BaseModel):
             reddit_client_secret=g("REDDIT_CLIENT_SECRET"),
             reddit_user_agent=g("REDDIT_USER_AGENT"),
             stocktwits_access_token=g("STOCKTWITS_ACCESS_TOKEN"),
+            desk_password_hash=g("DESK_PASSWORD_HASH"),
             allow_live=g("ALLOW_LIVE").lower() == "true",
         )
 

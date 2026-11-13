@@ -8,6 +8,7 @@ anthropic>=2.6         # Newsie grading (Skeptic in phase 6)
 
 # Trade Desk dashboard (3.19 tested; 4.x not yet)
 nicegui>=3.19,<4
+argon2-cffi>=23.1     # Trade Desk login (password hash)
 
 # dev / test
 pytest>=8.0

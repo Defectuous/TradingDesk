@@ -74,7 +74,9 @@ def _float(n: int | None) -> str:
 class DeskPage:
     """One browser tab. Holds the elements so updates don't rebuild them."""
 
-    def __init__(self, view: DeskView, desk: DeskService, log: ActionLog, alert_sound: bool) -> None:
+    def __init__(self, view: DeskView, desk: DeskService, log: ActionLog, alert_sound: bool,
+                 logout: bool = False) -> None:
+        self.logout = logout
         self.view = view
         self.desk = desk
         self.log = log
@@ -115,6 +117,10 @@ class DeskPage:
                 ui.switch("Sound", value=self.sound, on_change=self._toggle_sound).props("dense color=white")
                 ui.button("FLATTEN ALL / KILL", on_click=self._confirm_kill, icon="dangerous") \
                     .props("color=negative unelevated").classes("font-bold").mark("kill")
+                if self.logout:
+                    ui.button("Log out", icon="logout", on_click=lambda: ui.run_javascript(
+                        "fetch('/logout', {method: 'POST'}).finally(() => location.href = '/login')")) \
+                        .props("flat dense color=white").mark("logout")
             self.health_row = ui.row().classes("w-full gap-1 flex-wrap")
 
         self.banner = ui.label("").classes("w-full text-center font-bold py-1 rounded").mark("banner")
@@ -576,11 +582,27 @@ class PositionRow:
         self.targets.set_text(" / ".join(_price(x) for x in p.targets) or "—")
 
 
-def build_page(view: DeskView, desk: DeskService, log: ActionLog, alert_sound: bool = True) -> DeskPage:
-    return DeskPage(view, desk, log, alert_sound)
+def build_page(view: DeskView, desk: DeskService, log: ActionLog, alert_sound: bool = True,
+               logout: bool = False) -> DeskPage:
+    return DeskPage(view, desk, log, alert_sound, logout=logout)
 
 
-def page_factory(view: DeskView, desk: DeskService, log: ActionLog, alert_sound: bool) -> Callable[[], None]:
+SESSION_CHECK_SEC = 5.0
+
+
+def page_factory(view: DeskView, desk: DeskService, log: ActionLog, alert_sound: bool,
+                 session_ok: Callable[[str | None], bool] | None = None) -> Callable[[], None]:
+    """`session_ok` (login on): tabs re-check their session and leave when it ends or is logged out."""
     def root() -> None:
-        build_page(view, desk, log, alert_sound)
+        build_page(view, desk, log, alert_sound, logout=session_ok is not None)
+        if session_ok is not None:
+            from tradingdesk.desk.auth import COOKIE
+
+            request = ui.context.client.request
+            token = request.cookies.get(COOKIE) if request is not None else None
+
+            def check() -> None:
+                if not session_ok(token):
+                    ui.navigate.to("/login")
+            ui.timer(SESSION_CHECK_SEC, check)
     return root
