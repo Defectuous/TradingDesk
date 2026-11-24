@@ -114,7 +114,9 @@ class DeskPage:
                 self.broker_lbl = ui.label("—")
             ui.space()
             with ui.row().classes("items-center gap-3 no-wrap"):
-                ui.switch("Sound", value=self.sound, on_change=self._toggle_sound).props("dense color=white")
+                self.sound_switch = ui.switch("Sound", value=self.sound, on_change=self._toggle_sound) \
+                    .props("dense").mark("sound")
+                self._color_sound_switch()
                 ui.button("FLATTEN ALL / KILL", on_click=self._confirm_kill, icon="dangerous") \
                     .props("color=negative unelevated").classes("font-bold").mark("kill")
                 if self.logout:
@@ -270,8 +272,14 @@ class DeskPage:
     # -- actions --------------------------------------------------------------------------------
     def _toggle_sound(self, e: Any) -> None:
         self.sound = bool(e.value)
+        self._color_sound_switch()
         if self.sound:
             ui.run_javascript("window.__tdAudioUnlock && window.__tdAudioUnlock()")
+
+    def _color_sound_switch(self) -> None:
+        # Green when on, red when off (keep-color shows the color in the off position too).
+        self.sound_switch.props(remove="color keep-color")
+        self.sound_switch.props("color=positive" if self.sound else "color=negative keep-color")
 
     def report(self, what: str, res: DeskResult | str, ok: bool | None = None) -> None:
         msg = res.message if isinstance(res, DeskResult) else res
